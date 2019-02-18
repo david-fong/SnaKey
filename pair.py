@@ -20,6 +20,12 @@ class Pair:
         else:
             return NotImplemented
 
+    def __sub__(self, other):
+        if isinstance(other, Pair):
+            return Pair(self.x - other.x, self.y - other.y)
+        else:
+            return NotImplemented
+
     def __iadd__(self, other):
         if isinstance(other, Pair):
             self.x += other.x
@@ -38,3 +44,49 @@ class Pair:
         if not isinstance(other, Pair):
             return False
         return self.x == other.x and self.y == other.y
+
+    def __ne__(self, other):
+        if isinstance(other, Pair):
+            return self.x != other.x or self.y != other.y
+        else:
+            return NotImplemented
+
+    def __lt__(self, other):
+        if isinstance(other, Pair):
+            return self.y < other.y or \
+                   (
+                    self.y == other.y and
+                    self.x < other.x
+                   )
+        else:
+            return NotImplemented
+
+    def __gt__(self, other):
+        if isinstance(other, Pair):
+            return self.y > other.y or \
+                   (
+                    self.y == other.y and
+                    self.x > other.x
+                   )
+        else:
+            return NotImplemented
+
+    def __le__(self, other):
+        if isinstance(other, Pair):
+            return self.y < other.y or \
+                   (
+                    self.y == other.y and
+                    self.x <= other.x
+                   )
+        else:
+            return NotImplemented
+
+    def __ge__(self, other):
+        if isinstance(other, Pair):
+            return self.y > other.y or \
+                   (
+                    self.y == other.y and
+                    self.x >= other.x
+                   )
+        else:
+            return NotImplemented

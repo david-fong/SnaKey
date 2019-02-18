@@ -13,9 +13,13 @@ class Tile:
         self.pos = pos
         self.key = tk.StringVar()
         self.key.set(key)
-        self.label: tk.Label
+        self.label: tk.Label = None
         self.ditch = False
         self.canvas_id = None
+
+    def color(self, cs: dict):
+        """ cs follows {'bg': _, 'text': _} """
+        self.label.configure(cs)
 
 
 def weighted_choice(weights: dict):
@@ -37,6 +41,7 @@ class Game:
     """
     Attributes:
     -- width        : int               : The length of both the grid's sides in tiles.
+    -- ditches_on   : bool              : Whether the player wants to turn on ditches.
     -- populations  : dict{str: int}    : Map from all keys to their #instances in the grid.
                                            The sum of the values should always be width ** 2.
     -- grid         : list{list{Tile}}  : (0, 0) is at the top left of the screen.
@@ -44,16 +49,20 @@ class Game:
     -- targets      : list{Tile}        : tiles containing the target letter for a round.
     -- trail        : set{Tile}         : tiles the player has visited in a round.
 
+    -- chaser:      : Pair              : The position of an enemy chaser
+    -- level:       : float             : number of levels completed by the player.
     -- basket       : dict{str: int}    : total times obtained for each letter.
     -- start        : float             : process time of the start of a round.
     """
     LOWERCASE = {key for key in 'abcdefghijklmnopqrstuvwxyz'}
 
-    def __init__(self, width: int = 20, keyset: dict = None):
+    def __init__(self, width: int, keyset: dict = None):
         """
 
         """
         self.width = width
+        self.ditches_on = tk.BooleanVar()
+        self.ditches_on.set(False)
 
         if keyset is None:
             keyset = Game.LOWERCASE
@@ -72,6 +81,9 @@ class Game:
                 self.__shuffle_tile(tile)
 
         # Setup the first round's targets:
+        self.chaser = Pair(0, 0)
+        self.level = 0
+        self.basket = dict.fromkeys(self.populations, 0)  # TODO: implement updates
         self.start = process_time()
         self.check_round_complete()
 
@@ -86,6 +98,9 @@ class Game:
 
     def tile_at_pos(self):
         return self.grid[self.pos.y][self.pos.x]
+
+    def tile_at_chaser(self):
+        return self.tile_at(self.chaser)
 
     def __adjacent(self, pos: Pair):
         """
@@ -106,7 +121,7 @@ class Game:
         tiles' keys, the player moves to that tile's position.
         The tile being moved out of is added to trail.
         If the user is in a position from the last round's trail,
-        they must have first pressed the space-bar to move.
+        they must first press any key to get unstuck.
 
         Returns whether the player completed a round with this move.
         """
@@ -114,7 +129,7 @@ class Game:
         if pos.ditch:
             # No movement is possible when the player
             # is in a ditch that hasn't been cleared.
-            pos.ditch = key == ' '
+            pos.ditch = False
             return False
         elif key not in self.populations.keys():
             return False  # Ignore keys not in the grid.
@@ -176,6 +191,7 @@ class Game:
             # all tiles with the target key.
             return False
 
+        self.level += 1
         now = process_time()
         elapsed = now - self.start
         self.start = now
@@ -194,17 +210,61 @@ class Game:
         for row in self.grid:
             for tile in row:
                 tile.ditch = False
-            self.targets.extend(list(filter(
-                lambda t: t.key.get() == target, row)
-            ))
+                if tile.key.get() == target and tile.pos != self.pos:
+                    self.targets.append(tile)
         # debug: self.targets = [self.targets[0], ]
 
         # Raise ditch flags for
         # trail tiles from this round:
         for tile in self.trail:
-            tile.ditch = True
+            tile.ditch = self.ditches_on.get()
         self.trail.clear()
         return True
+
+    def move_chaser(self):
+        """
+        Moves the chaser closer to the player.
+        Returns True if the chaser is on the player.
+        """
+        diff = self.pos - self.chaser
+        if diff.x < -1:
+            diff.x = -1
+        if diff.x > 1:
+            diff.x = 1
+        if diff.y < -1:
+            diff.y = -1
+        if diff.y > 1:
+            diff.y = 1
+        self.chaser += diff
+        return self.chaser == self.pos
+
+    def chaser_speed(self):
+        """
+        Returns a speed in tiles per second
+        """
+        f = self.width ** 2 / len(self.populations)
+        sub_level = 2 ** -(len(self.targets) / 0.3 / f)
+        level = self.level + sub_level
+
+        high = 2.7  # Tiles per second
+        low = 0.75  # Tiles per second
+        return (high-low)*(1 - 2 ** -(level/5.4)) + low
+
+    def restart(self):
+        """
+        Resets the game.
+        """
+        self.populations = dict.fromkeys(self.populations, 0)
+
+        self.pos = Pair(self.width // 2, self.width // 2)
+        self.targets = []
+        self.trail = set()
+
+        self.chaser = Pair(0, 0)
+        self.level = 0
+        self.basket = dict.fromkeys(self.populations, 0)
+        self.start = process_time()
+        self.check_round_complete()
 
 
 class SnaKeyGUI(tk.Tk):
@@ -216,24 +276,32 @@ class SnaKeyGUI(tk.Tk):
     """
     color_schemes = {
         'default': {
-            'bg': 'black',
-            'fg': 'white',
-            'text': 'black',
-            'pos': 'cyan',
-            'targets': 'yellow',
-            'trail': 'gray80',
-            'ditch': 'gray50',
-            'ditch_targets': 'orange',
-        }
+            'tile':     {'bg': 'white',   'fg': 'black'},
+            'pos':      {'bg': 'cyan',    'fg': 'black'},
+            'target':   {'bg': 'yellow',  'fg': 'black'},
+            'trail':    {'bg': 'gray80',  'fg': 'black'},
+            'ditch':    {'bg': 'gray60',  'fg': 'black'},
+            'ditch_target': {'bg': 'orange', 'fg': 'black'},
+            'chaser':   {'bg': 'magenta', 'fg': 'black'},
+        },
+        '2': {
+            'tile':     {'bg': 'black',   'fg': 'white'},
+            'pos':      {'bg': 'blue',    'fg': 'white'},
+            'target':   {'bg': 'gold',    'fg': 'white'},
+            'trail':    {'bg': 'gray20',  'fg': 'white'},
+            'ditch':    {'bg': 'gray40',  'fg': 'white'},
+            'ditch_target': {'bg': 'brown', 'fg': 'white'},
+            'chaser':   {'bg': 'maroon',  'fg': 'white'},
+        },
     }
 
-    def __init__(self, width: int = None):
+    def __init__(self, width: int = 20):
         super(SnaKeyGUI, self).__init__()
         self.title('Snakey - David Fong')
-        self.game = Game() if width is None else Game(width)
+        self.game = Game(width)
 
         # Setup the grid display:
-        grid = tk.Frame(self, bg='black')
+        grid = tk.Frame(self)
         for y in range(self.game.width):
             for x in range(self.game.width):
                 tile = self.game.grid[y][x]
@@ -249,14 +317,46 @@ class SnaKeyGUI(tk.Tk):
         self.cs = SnaKeyGUI.color_schemes['default']
         self.update_cs()
 
-        # Bind key-presses:
+        # Bind key-presses and setup the menu:
+        self.__setup_menu()
         self.bind('<Key>', self.move)
+
+        # Start the chaser:
+        self.move_chaser()
+
+    def __setup_menu(self):
+        """
+        Sets up a menu-bar.
+        """
+        menu_bar = tk.Menu(self)
+        self.configure(menu=menu_bar)
+
+        # options menu:
+        options = tk.Menu(menu_bar)
+        menu_bar.add_cascade(label='options', menu=options)
+        options.add_checkbutton(
+            label='ditches', offvalue=False, onvalue=True,
+            variable=self.game.ditches_on
+        )
+
+        # color menu:
+        def update_cs(*args):
+            self.update_cs(cs_string_var.get())
+        colors = tk.Menu(menu_bar)
+        menu_bar.add_cascade(label='colors', menu=colors)
+        cs_string_var = tk.StringVar()
+        cs_string_var.trace('w', update_cs)
+        for scheme in SnaKeyGUI.color_schemes.keys():
+            colors.add_radiobutton(
+                label=scheme, value=scheme,
+                variable=cs_string_var
+            )
 
     def move(self, event):
         """
 
         """
-        self.game.tile_at_pos().label.configure(bg=self.cs['trail'])
+        self.game.tile_at_pos().color(self.cs['trail'])
 
         # Execute the move in the internal representation
         #  and check if the move resulted in the round ending:
@@ -265,39 +365,72 @@ class SnaKeyGUI(tk.Tk):
             self.update_cs()
 
         # Highlight new position tile:
-        self.game.tile_at_pos().label.configure(bg=self.cs['pos'])
+        self.game.tile_at_pos().color(self.cs['pos'])
 
     def update_cs(self, cs: str = None):
         """
-
+        Updates all tiles based on the new color scheme.
+        (or the current one if no new scheme is given).
         """
         if cs is None:
             cs = self.cs
         else:
-            self.cs = cs
             cs = SnaKeyGUI.color_schemes[cs]
+            self.cs = cs
 
         # Recolor all tiles:
         for row in self.game.grid:
             for tile in row:
-                tile.label.configure(bg=cs['fg'], fg=cs['text'])
-                if tile.ditch:
-                    tile.label.configure(bg=cs['ditch'])
+                tile.color(cs['tile'])
+                # TODO: change this to RBG math in Tile:
+                # if tile.ditch:
+                #     tile.color(cs['ditch'])
 
         # Highlight the player's current position:
-        self.game.tile_at_pos().label\
-            .configure(bg=cs['pos'])
+        self.game.tile_at_pos().color(cs['pos'])
 
         # Highlight tiles from the player's trail:
         for tile in self.game.trail:
-            tile.label.configure(bg=cs['trail'])
+            tile.color(cs['trail'])
 
         # Highlight tiles that need to be touched
         #  to complete the current round:
         for tile in self.game.targets:
-            tile.label.configure(bg=cs['targets'])
-            if tile.ditch:
-            tile.label.configure(bg=cs['ditch_targets'])
+            tile.color(cs['target'])
+            # TODO: change this to RBG math in Tile:
+            # if tile.ditch:
+            #     tile.color(cs['ditch_target'])
+
+        # Highlight the chaser's current position:
+        self.game.tile_at_chaser().color(cs['chaser'])
+
+    def move_chaser(self):
+        """
+        Moves the chaser toward the player
+        and displays the changes in the GUI.
+        """
+        tile = self.game.tile_at_chaser()
+        if tile in self.game.targets:
+            tile.color(self.cs['target'])
+        elif tile in self.game.trail:
+            tile.color(self.cs['trail'])
+        else:
+            tile.color(self.cs['tile'])
+
+        # Move the chaser in the internal representation:
+        if self.game.move_chaser():
+            # The chaser caught the player:
+            self.game.tile_at_chaser().color(self.cs['chaser'])
+            print('game over!')
+            return
+        else:
+            # Loop the chaser while it
+            # hasn't caught the player.
+            self.game.tile_at_chaser().color(self.cs['chaser'])
+            self.after(
+                int(1000 // self.game.chaser_speed()),
+                func=self.move_chaser
+            )
 
 
 if __name__ == '__main__':
