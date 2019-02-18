@@ -1,3 +1,5 @@
+from time import process_time
+
 from pair import *
 import tkinter as tk
 
@@ -41,8 +43,9 @@ class Game:
     -- pos          : Pair              : The player's current position.
     -- targets      : list{Tile}        : tiles containing the target letter for a round.
     -- trail        : set{Tile}         : tiles the player has visited in a round.
-    -- ditch        : set{Tile}         : tiles the player visited in the previous round.
-    -- stuck        : bool              : Whether the player is in the ditch and has not pressed space.
+
+    -- basket       : dict{str: int}    : total times obtained for each letter.
+    -- start        : float             : process time of the start of a round.
     """
     LOWERCASE = {key for key in 'abcdefghijklmnopqrstuvwxyz'}
 
@@ -59,18 +62,17 @@ class Game:
             [Tile(Pair(x, y)) for x in range(width)]
             for y in range(width)]
 
-        # initialize letters with random, balanced keys
-        self.populations[''] = 0
-        for row in self.grid:
-            for tile in row:
-                self.__shuffle_tile(tile)
-        del self.populations['']
-
         self.pos = Pair(width // 2, width // 2)
         self.targets = []
         self.trail = set()
 
+        # initialize letters with random, balanced keys
+        for row in self.grid:
+            for tile in row:
+                self.__shuffle_tile(tile)
+
         # Setup the first round's targets:
+        self.start = process_time()
         self.check_round_complete()
 
     def tile_at(self, pos: Pair):
@@ -81,6 +83,9 @@ class Game:
             return self.grid[pos.y][pos.x]
         else:
             return None
+
+    def tile_at_pos(self):
+        return self.grid[self.pos.y][self.pos.x]
 
     def __adjacent(self, pos: Pair):
         """
@@ -105,7 +110,7 @@ class Game:
 
         Returns whether the player completed a round with this move.
         """
-        pos = self.tile_at(self.pos)
+        pos = self.tile_at_pos()
         if pos.ditch:
             # No movement is possible when the player
             # is in a ditch that hasn't been cleared.
@@ -119,13 +124,13 @@ class Game:
         # Adjacent tiles with the same key as the key parameter:
         select = list(filter(lambda tile: tile.key.get() == key, adj))
         if select:  # If an adjacent key has a matching key:
-            self.trail |= {self.pos}
+            self.trail |= {self.tile_at_pos()}
             # The selected tile to move to:
             select = select[0]
             self.pos = adj[select]
             if select in self.targets:
                 self.targets.remove(select)
-            print(self.pos, select.key.get())
+            # debug: print(self.pos, select.key.get())
             return self.check_round_complete()
         else:
             return False
@@ -139,6 +144,7 @@ class Game:
         adj = []
         for y in range(-2, 3, 1):
             adj.extend([Pair(x, y) + tile.pos for x in range(-2, 3, 1)])
+        del adj[12]  # The current position.
         adj = {self.tile_at(pair) for pair in adj}
         if None in adj:
             adj.remove(None)
@@ -149,8 +155,6 @@ class Game:
         Randomizes the parameter tile's key,
         favoring less-common keys in the current grid.
         """
-        self.populations[tile.key.get()] -= 1
-
         lower = min(self.populations.values())
         adj = self.__wide_adjacent(tile)
         weights = {  # Gives zero weight to neighboring keys.
@@ -167,13 +171,18 @@ class Game:
         Returns True if the player touched the last
         target for the current round in this move.
         """
-        if not self.targets:
+        if self.targets:
             # The player has not yet touched
             # all tiles with the target key.
             return False
 
+        now = process_time()
+        elapsed = now - self.start
+        self.start = now
+
         # Shuffle tiles from this round's trail:
         for tile in self.trail:
+            self.populations[tile.key.get()] -= 1
             tile.key.set('')
         for tile in self.trail:
             self.__shuffle_tile(tile)
@@ -188,6 +197,7 @@ class Game:
             self.targets.extend(list(filter(
                 lambda t: t.key.get() == target, row)
             ))
+        # debug: self.targets = [self.targets[0], ]
 
         # Raise ditch flags for
         # trail tiles from this round:
@@ -197,9 +207,12 @@ class Game:
         return True
 
 
-class SnakeyGUI(tk.Tk):
+class SnaKeyGUI(tk.Tk):
     """
-
+    Attributes:
+        -- game     : Game
+        -- cs       : dict{str: dict{str: str}}
+        -- grid:    : Frame
     """
     color_schemes = {
         'default': {
@@ -207,16 +220,17 @@ class SnakeyGUI(tk.Tk):
             'fg': 'white',
             'text': 'black',
             'pos': 'cyan',
+            'targets': 'yellow',
             'trail': 'gray80',
-            'target': 'yellow'
+            'ditch': 'gray50',
+            'ditch_targets': 'orange',
         }
     }
 
     def __init__(self, width: int = None):
-        super(SnakeyGUI, self).__init__()
+        super(SnaKeyGUI, self).__init__()
         self.title('Snakey - David Fong')
         self.game = Game() if width is None else Game(width)
-        self.cs = SnakeyGUI.color_schemes['default']
 
         # Setup the grid display:
         grid = tk.Frame(self, bg='black')
@@ -231,6 +245,10 @@ class SnakeyGUI(tk.Tk):
         self.grid = grid
         grid.pack()
 
+        # Setup the colors:
+        self.cs = SnaKeyGUI.color_schemes['default']
+        self.update_cs()
+
         # Bind key-presses:
         self.bind('<Key>', self.move)
 
@@ -238,23 +256,51 @@ class SnakeyGUI(tk.Tk):
         """
 
         """
+        self.game.tile_at_pos().label.configure(bg=self.cs['trail'])
+
+        # Execute the move in the internal representation
+        #  and check if the move resulted in the round ending:
         if self.game.move(event.keysym):
-            # TODO: a round has finished. update all tile displays:
-            for tile in self.game.targets:
-                tile.label.onfigure(fg=self.cs['fg'])
+            # If round over, update entire display.
+            self.update_cs()
 
-    def update_cs(self, cs: str = 'default'):
+        # Highlight new position tile:
+        self.game.tile_at_pos().label.configure(bg=self.cs['pos'])
+
+    def update_cs(self, cs: str = None):
         """
 
         """
-        cs = SnakeyGUI.color_schemes[cs]
-        self.cs = cs
+        if cs is None:
+            cs = self.cs
+        else:
+            self.cs = cs
+            cs = SnaKeyGUI.color_schemes[cs]
+
+        # Recolor all tiles:
         for row in self.game.grid:
             for tile in row:
-                tile.label.configure(bg=cs['bg'])
+                tile.label.configure(bg=cs['fg'], fg=cs['text'])
+                if tile.ditch:
+                    tile.label.configure(bg=cs['ditch'])
+
+        # Highlight the player's current position:
+        self.game.tile_at_pos().label\
+            .configure(bg=cs['pos'])
+
+        # Highlight tiles from the player's trail:
+        for tile in self.game.trail:
+            tile.label.configure(bg=cs['trail'])
+
+        # Highlight tiles that need to be touched
+        #  to complete the current round:
+        for tile in self.game.targets:
+            tile.label.configure(bg=cs['targets'])
+            if tile.ditch:
+            tile.label.configure(bg=cs['ditch_targets'])
 
 
 if __name__ == '__main__':
     print({None: 'hi'})
-    test = SnakeyGUI()
+    test = SnaKeyGUI()
     test.mainloop()
