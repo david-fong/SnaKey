@@ -51,12 +51,13 @@ def weighted_choice(weights: dict):
     Favors keys with greater value mappings
     """
     from random import uniform
-    choice = uniform(0, sum(weights.values()))
+    w_choice = uniform(0, sum(weights.values()))
     for key, weight in weights.items():
-        if choice > weight:
-            choice -= weight
+        if w_choice > weight:
+            w_choice -= weight
         else:
             return key
+    raise ArithmeticError('This should not happen.')
 
 
 class Game:
@@ -156,6 +157,8 @@ class Game:
         self.basket = dict.fromkeys(self.populations, 0)
 
         # Initialize the player:
+        if self.pos is not None:
+            self.__shuffle_tile(self.player_tile())
         self.pos = Pair(self.width // 2, self.width // 2)
         self.targets = []
         self.trail = []
@@ -174,8 +177,8 @@ class Game:
         if self.nommer is not None:
             self.__shuffle_tile(self.nommer_tile())
         self.nommer = Pair(self.width-1, self.width-1)
-        self.populations[self.chaser_tile().key.get()] -= 1
-        self.chaser_tile().key.set(self.__get_face_key('chaser'))
+        self.populations[self.nommer_tile().key.get()] -= 1
+        self.nommer_tile().key.set(self.__get_face_key('nommer'))
 
         # Generate the first round's targets:
         self.check_round_complete()
@@ -184,7 +187,7 @@ class Game:
         """
         Returns the tile at the given Pair coordinate.
         """
-        if pos.in_range(self.width, self.width):
+        if pos.in_bound(self.width, self.width):
             return self.grid[self.width * pos.y + pos.x]
         else:
             return None
@@ -198,20 +201,21 @@ class Game:
         return self.tile_at(self.chaser)
 
     def nommer_tile(self):
+        """ Just as a readability aid. """
         return self.tile_at(self.nommer)
 
     def __adjacent(self, pos: Pair):
         """
-        Returns a dict from Tile objects adjacent to
-        the tile at pos to their positions as Pair objects.
+        Returns a set of tiles
+        adjacent to, and on top of pos.
         """
-        adj = [(1, 0), (1, -1), (0, -1), (-1, -1),
-               (-1, 0), (-1, 1), (0, 1), (1, 1)]
-        adj = [pos + Pair(offset[0], offset[1]) for offset in adj]
-        tile_pos = {self.tile_at(pair): pair for pair in adj}
-        if None in tile_pos:
-            del tile_pos[None]
-        return tile_pos
+        offsets = []
+        for y in range(-1, 2):
+            offsets.extend([Pair(x, y) for x in range(-1, 2)])
+        adj = {self.tile_at(pos + offset) for offset in offsets}
+        if None in adj:
+            adj.remove(None)
+        return adj
 
     def move(self, key: str):
         """
@@ -228,6 +232,10 @@ class Game:
         """
         # The player wants to backtrack:
         if key == 'space' and self.trail:
+            # Do not allow the player
+            # to backtrack onto an enemy:
+            if self.trail[-1] not in self.populations:
+                return
             self.__shuffle_tile(self.player_tile())
             popped = self.trail.pop(-1)
             self.pos = popped.pos
@@ -240,50 +248,37 @@ class Game:
         if tile in self.trail and self.stuck:
             self.stuck = False
             return False
-        elif key not in self.populations.keys():
+        elif key not in self.populations:
             return False  # Ignore keys not in the grid.
 
         # A dict from adjacent tiles to their positions:
         adj = self.__adjacent(self.pos)
         # Adjacent tiles with the same key as the key parameter:
-        select = list(filter(lambda t: t.key.get() == key, adj))
+        dest_singleton = list(filter(lambda t: t.key.get() == key, adj))
 
         # If the user pressed a key
         # corresponding to an adjacent tile:
-        if select:
+        if dest_singleton:
             # The selected tile to move to:
-            select = select[0]
+            dest = dest_singleton[0]
 
             self.__shuffle_tile(tile)
             self.trail.append(self.player_tile())
-            self.pos = adj[select]
-            self.populations[select.key.get()] -= 1
-            select_key = select.key.get()
-            select.key.set(self.__get_face_key('player'))
+            self.pos = dest.pos
+            self.populations[dest.key.get()] -= 1
+            select_key = dest.key.get()
+            dest.key.set(self.__get_face_key('player'))
 
-            if select in self.trail and self.ditches_on.get():
+            # Handle ditches if player moved into their trail:
+            if dest in self.trail and self.ditches_on.get():
                 self.stuck = True
-            if select in self.targets:
-                self.targets.remove(select)
+            # Handle scoring if player touched a target:
+            if dest in self.targets:
+                self.targets.remove(dest)
                 self.basket[select_key] += 1
                 return self.check_round_complete()
 
         return False
-
-    def __wide_adjacent(self, tile: Tile):
-        """
-        Return a set of keys in the 5x5 ring around tile.
-        This represents keys that cannot go in tile, since
-        they would create an ambiguity in movement direction.
-        """
-        adj = []
-        for y in range(-2, 3, 1):
-            adj.extend([Pair(x, y) + tile.pos for x in range(-2, 3, 1)])
-        del adj[12]  # The current position.
-        adj = {self.tile_at(pair) for pair in adj}
-        if None in adj:
-            adj.remove(None)
-        return {t.key.get() for t in adj}
 
     def __targets_per_round(self):
         """
@@ -301,9 +296,28 @@ class Game:
         based on the key of the tile being shuffled.
         These changes should be handled externally.
         """
+        def __wide_adjacent(origin: Tile):
+            """
+            Return a set of keys in the 5x5 ring around tile.
+            This represents keys that cannot go in tile, since
+            they would create an ambiguity in movement direction.
+            """
+            adjacent = []
+            for y in range(-2, 3, 1):
+                adjacent.extend(
+                    [Pair(x, y) + origin.pos
+                     for x in range(-2, 3, 1)])
+            del adjacent[12]  # The current position.
+            adjacent = {self.tile_at(pair) for pair in adjacent}
+            if None in adjacent:
+                adjacent.remove(None)
+            return {t.key.get() for t in adjacent}
+
         lower = min(self.populations.values())
-        adj = self.__wide_adjacent(tile)
-        weights = {  # Gives zero weight to neighboring keys.
+        adj = __wide_adjacent(tile)
+
+        weights = {
+            # Gives zero weight to neighboring keys.
             key: 4 ** (lower - count) if key not in adj else 0
             for key, count in self.populations.items()}
 
@@ -314,6 +328,7 @@ class Game:
     def check_round_complete(self):
         """
         Should be called at the end of every move.
+        Spawns the next round's targets if the round ended.
         Returns True if the player touched the last
         target for the current round in this move.
         """
@@ -331,15 +346,15 @@ class Game:
             # find tiles with matching keys:
             target = weighted_choice(self.populations)
             self.targets = list(filter(
-                lambda t: t.key.get() == target and
-                t is not self.player_tile(),
+                lambda t: t.key.get() == target,
                 self.grid))
         elif self.keygen_mode.get() == 'random':
             # Get an appropriate number
             # of random keys for targets:
             while len(self.targets) < self.__targets_per_round():
                 target = choice(self.grid)
-                if target not in self.targets:
+                if target not in self.targets and \
+                        target in self.populations:
                     self.targets.append(target)
         # debug = self.targets = choice(self.targets)
 
@@ -354,41 +369,98 @@ class Game:
         # The chaser changes keys in its wake:
         self.__shuffle_tile(self.chaser_tile())
 
-        diff = self.pos - self.chaser
-        if diff.x < -1:
-            diff.x = -1
-        if diff.x > 1:
-            diff.x = 1
-        if diff.y < -1:
-            diff.y = -1
-        if diff.y > 1:
-            diff.y = 1
-        # The user can disable chaser diagonals:
-        if diff.x != 0 and diff.y != 0 and not self.enemy_diag.get():
-            if weighted_choice(
-                    {True: abs(diff.x),
-                     False: abs(diff.y)}):
-                diff.x = 0
-            else:
-                diff.y = 0
-        self.chaser += diff
-
-        tile = self.chaser_tile()
-        if tile.key.get() in self.populations:
-            self.populations[tile.key.get()] -= 1
-        tile.key.set(self.__get_face_key('chaser'))
+        diff = (self.pos - self.chaser).ceil(radius=1)
+        self.chaser += self.__enemy_diff(
+            self.chaser, diff, can_touch_player=True
+        )
+        key_var = self.chaser_tile().key
+        if key_var.get() in self.populations:
+            # If the chaser did not land on the player:
+            self.populations[key_var.get()] -= 1
+        key_var.set(self.__get_face_key('chaser'))
         return self.chaser == self.pos
 
     def move_nommer(self):
         """
         Rules:
-        Moves after the chaser has moved and does NOT touch the chaser.
+        If sharing the same clock as the chaser,
+            Moves after the chaser has moved
+            and does NOT touch the chaser.
         If a target is in a certain radius, move toward it.
         Otherwise, move towards a tile a certain distance
             from the player in the direction of their recent
             trajectory. Do NOT touch the player.
         """
-        pass  # TODO
+        def __targets_in_range(origin: Pair, radius: int):
+            """
+            Returns a list of targets within radius tiles
+            from origin (inclusive)- in order of distance-
+            that are in the target list for the current round.
+            """
+            adj = []
+            for y in range(-radius, radius+1):
+                adj.extend(
+                    [Pair(x, y) for x in
+                     range(-radius, radius+1)])
+            adj.sort(key=Pair.__abs__)
+            adj = [self.tile_at(origin + pair) for pair in adj]
+            return list(filter(lambda tile: tile in self.targets, adj))
+
+        # Move toward targets within a quarter grid range:
+        targets = __targets_in_range(self.nommer, self.width//4)
+        if targets:
+            pass  # Find one that doesn't have an enemy on it
+            return
+
+        # Otherwise, if the player is more than a third
+        # of the grid away, follow the player
+        elif (self.pos - self.nommer).norm() > self.width/3:
+            pass
+            return
+
+        # Follow the player (assuming they are heading for one)
+        else:
+            def __player_trajectory():
+                pass
+            pass
+            return
+
+    def __enemy_diff(self, pos: Pair, diff: Pair,
+                     can_touch_player: bool = False):
+        """
+        Applies the following changes:
+        -- optionally projecting enemy diagonal moves onto axes.
+        -- avoiding other enemies (and possibly the player).
+
+        Assumes that the enemy at pos
+        currently has no position on the grid.
+        """
+        if not self.enemy_diag.get():
+            if weighted_choice({True:  abs(diff.x),
+                                False: abs(diff.y)}):
+                diff.x = 0
+            else:
+                diff.y = 0
+
+        # Allow enemies like the chaser to touch the player:
+        if pos + diff == self.pos and can_touch_player:
+            return diff
+        # If the enemy would touch another enemy or the player:
+        elif (self.tile_at(pos + diff).key.get()
+                not in self.populations):
+            # Find a random free tile to move to:
+            adj = self.__adjacent(pos)
+            popped = choice(adj)
+            adj.remove(choice)
+            while adj:
+                if popped.key.get() in self.populations:
+                    break
+                popped = choice(adj)
+                adj.remove(choice)
+            return popped.pos - pos
+        # Everything is fine:
+        else:
+            return diff
 
     def enemy_speed(self):
         """

@@ -1,3 +1,6 @@
+from math import sqrt
+
+
 class Pair:
     """
     Represents a position in 2D grid space.
@@ -11,8 +14,27 @@ class Pair:
         else:
             raise TypeError
 
-    def in_range(self, x_bound, y_bound):
+    def in_bound(self, x_bound, y_bound):
         return 0 <= self.x < x_bound and 0 <= self.y < y_bound
+
+    def norm(self):
+        return sqrt(self.x ** 2 + self.y ** 2)
+
+    def ceil(self, radius: int):
+        x = self.x
+        y = self.y
+        if self.x < -radius:
+            x = -radius
+        elif self.x > radius:
+            x = radius
+        if self.y < -radius:
+            y = -radius
+        elif self.y > radius:
+            y = radius
+        return Pair(x, y)
+
+    def __abs__(self):
+        return Pair(abs(self.x), abs(self.y))
 
     def __add__(self, other):
         if isinstance(other, Pair):
