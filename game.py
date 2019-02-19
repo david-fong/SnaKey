@@ -1,6 +1,5 @@
+#!/usr/bin/env python
 from random import choice
-
-from webcolors import hex_to_rgb, name_to_hex, rgb_to_hex
 
 from pair import *
 import tkinter as tk
@@ -21,27 +20,6 @@ class Tile:
     def color(self, cs: dict):
         """ cs follows {'bg': _, 'text': _} """
         self.label.configure(cs)
-
-    @staticmethod
-    def shade(cs: dict):
-        shaded = cs.copy()
-        if '#' not in cs['bg']:
-            shaded['bg'] = name_to_hex(cs['bg'])
-
-        shade = 0x20
-        rgb = hex_to_rgb(shaded['bg'])
-        average = sum(rgb) // 3
-
-        # Shading light colors makes them lighter:
-        if average < shade:
-            rgb = (val + shade if val + shade < 0xFF
-                   else 0xFF for val in rgb)
-        # Shading dark colors makes them darker:
-        else:
-            rgb = (val - shade if val >= shade
-                   else 0x00 for val in rgb)
-        shaded['bg'] = rgb_to_hex(rgb)
-        return shaded
 
 
 def weighted_choice(weights: dict):
@@ -497,7 +475,7 @@ class SnaKeyGUI(tk.Tk):
     """
     color_schemes = {
         'default': {
-            'lines':    Tile.shade({'bg':       'white'}),
+            'lines':    {'bg': 'whiteSmoke', },
             'tile':     {'bg': 'white',         'fg': 'black'},
             'chaser':   {'bg': 'violet',        'fg': 'black'},
             'nommer':   {'bg': 'chartreuse',    'fg': 'black'},
@@ -506,7 +484,7 @@ class SnaKeyGUI(tk.Tk):
             'trail':    {'bg': 'lightCyan',     'fg': 'black'},
         },
         'matrix': {
-            'lines':    Tile.shade({'bg':       'black'}),
+            'lines':    {'bg': '#1c1c1c', },
             'tile':     {'bg': 'black',         'fg': 'lightGrey'},
             'chaser':   {'bg': 'red',           'fg': 'black'},
             'nommer':   {'bg': 'red',           'fg': 'black'},
@@ -515,7 +493,7 @@ class SnaKeyGUI(tk.Tk):
             'trail':    {'bg': 'darkGreen',     'fg': 'black'},
         },
         'sheep :>': {
-            'lines':    Tile.shade({'bg':       'lawnGreen'}),
+            'lines':    {'bg': '#77ef02', },
             'tile':     {'bg': 'lawnGreen',     'fg': 'darkGreen'},
             'chaser':   {'bg': 'orangeRed',     'fg': 'black'},
             'nommer':   {'bg': 'orangeRed',     'fg': 'black'},
@@ -680,8 +658,6 @@ class SnaKeyGUI(tk.Tk):
         Moves the chaser toward the player
         and displays the changes in the GUI.
         """
-        # TODO: remove debug line:
-        print(sum(self.game.populations.values()), self.game.populations)
         self.__erase_enemy(self.game.chaser_tile())
 
         # Move the chaser in the internal representation:
@@ -732,6 +708,9 @@ class SnaKeyGUI(tk.Tk):
         print('game over!', self.game.basket)
 
 
-if __name__ == '__main__':
+def main():
     test = SnaKeyGUI()
     test.mainloop()
+
+
+main()
