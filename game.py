@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 from random import choice
 
 from pair import *
@@ -124,7 +123,7 @@ class Game:
         self.sad_mode.set(False)
 
         self.keygen_mode = tk.StringVar()
-        self.keygen_mode.set('letter')
+        self.keygen_mode.set('random')
 
     def restart(self):
         """
@@ -546,18 +545,19 @@ class SnaKeyGUI(tk.Tk):
             self.game.restart()
             self.bind('<Key>', self.move)
             self.update_cs()
-
             self.after_cancel(self.chaser_cancel_id)
             self.chaser_cancel_id = self.after(2000, self.move_chaser)
-
             self.after_cancel(self.nommer_cancel_id)
             self.nommer_cancel_id = self.after(2000, self.move_nommer)
 
+        # Setup the restart button:
         self.restart = tk.Button(
             self, text='restart', command=restart,
             activebackground='whiteSmoke',
         )
         self.restart.pack()
+
+        # Setup the score label:
 
     def __setup_menu(self):
         """
@@ -584,7 +584,7 @@ class SnaKeyGUI(tk.Tk):
 
         # Keygen mode menu:
         keygen_mode = tk.Menu(menu_bar)
-        for mode in ('letter', 'random'):
+        for mode in ('random', 'letter'):
             keygen_mode.add_radiobutton(
                 label=mode, value=mode,
                 variable=self.game.keygen_mode, )
@@ -650,8 +650,9 @@ class SnaKeyGUI(tk.Tk):
         for tile in self.game.targets:
             tile.color(cs['target'])
 
-        # Highlight the chaser's current position:
+        # Highlight the current positions of enemies:
         self.game.chaser_tile().color(cs['chaser'])
+        self.game.nommer_tile().color(cs['nommer'])
 
     def move_chaser(self):
         """
@@ -701,16 +702,20 @@ class SnaKeyGUI(tk.Tk):
         """
         Shows the player's score and then restarts the game.
         """
+        # Disable player movement:
         self.unbind('<Key>')
         # TODO: show the score:
+
+        # Make sure all enemies stop moving:
+        self.after_cancel(self.chaser_cancel_id)
+        self.after_cancel(self.nommer_cancel_id)
+
+        # Flash the restart button:
         for _ in range(3):
             self.restart.flash()
         print('game over!', self.game.basket)
 
 
-def main():
-    test = SnaKeyGUI()
-    test.mainloop()
-
-
-main()
+if __name__ == '__main__':
+    root = SnaKeyGUI()
+    root.mainloop()
