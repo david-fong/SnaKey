@@ -237,7 +237,7 @@ class Game:
                 return
             # Do not allow the player
             # to backtrack onto an enemy:
-            if self.trail[-1] not in self.populations:
+            if self.trail[-1].key.get() not in self.populations:
                 return
             self.__shuffle_tile(self.player_tile())
             popped = self.trail.pop(-1)
@@ -246,9 +246,8 @@ class Game:
             popped.key.set(self.__get_face_key('player'))
             return
 
-        tile = self.player_tile()
         # The player just walked into their trail last move:
-        if tile in self.trail and self.stuck:
+        if self.player_tile() in self.trail and self.stuck:
             self.stuck = False
             return False
         elif key not in self.populations:
@@ -264,7 +263,7 @@ class Game:
             # The selected tile to move to:
             dest = dest_singleton[0]
 
-            self.__shuffle_tile(tile)
+            self.__shuffle_tile(self.player_tile())
             self.trail.append(self.player_tile())
             self.pos = dest.pos
             self.populations[dest.key.get()] -= 1
@@ -567,6 +566,7 @@ class SnaKeyGUI(tk.Tk):
 
         def restart():
             self.game.restart()
+            self.bind('<Key>', self.move)
             self.update_cs()
 
             self.after_cancel(self.chaser_cancel_id)
@@ -725,6 +725,7 @@ class SnaKeyGUI(tk.Tk):
         """
         Shows the player's score and then restarts the game.
         """
+        self.unbind('<Key>')
         # TODO: show the score:
         for _ in range(3):
             self.restart.flash()
