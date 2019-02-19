@@ -62,23 +62,28 @@ def weighted_choice(weights: dict):
 class Game:
     """
     Attributes:
+    CORE ATTRIBUTES -------------------------------------------------------------------------------
     -- width        : int               : The length of both the grid's sides in tiles.
     -- populations  : dict{str: int}    : Map from all keys to their #instances in the grid.
-                                           The sum of the values should always be width ** 2.
+                                          The sum of the values should always be width ** 2.
+    -- grid         : list{Tile}        : Row-order. Index 0 is at the top left of the screen.
 
-    -- grid         : list{list{Tile}}  : (0, 0) is at the top left of the screen.
+    PLAYER POSITION DATA --------------------------------------------------------------------------
     -- pos          : Pair              : The player's current position.
     -- targets      : list{Tile}        : tiles containing the target letter for a round.
     -- trail        : list{Tile}        : tiles the player has visited in a round.
     -- stuck        : bool              : Whether the Player entered their trail in the last move.
 
+    GAME-PLAY OPTIONS -----------------------------------------------------------------------------
     -- ditches_on   : BooleanVar        : Whether the player wants to turn on ditches.
-    -- chaser_diag  : BooleanVar        : Whether the chaser can move in diagonals.
+    -- enemy_diag   : BooleanVar        : Whether the enemies can move in diagonals.
     -- speedup      : BooleanVar        : Whether the chaser will speed up when finishing a round.
     -- sad_mode     : BooleanVar        : Makes the faces sad. Purely aesthetic.
     -- keygen_mode  : StringVar         : How to choose keys for a round. same letter? random?
 
-    -- chaser:      : Pair              : The position of an enemy chaser
+    SCORING & OPPONENTS ---------------------------------------------------------------------------
+    -- chaser       : Pair              : The position of an enemy chaser.
+    -- nommer       : Pair              : Competes with player to eat targets.
     -- level        : int               : number of levels completed by the player.
     -- basket       : dict{str: int}    : total times obtained for each letter.
     -- start        : float             : process time of the start of a round.
@@ -117,6 +122,7 @@ class Game:
         self.trail:     list = None
         self.stuck:     bool = None
         self.chaser:    Pair = None
+        self.nommer:    Pair = None
         self.level:      int = None
         self.basket:    dict = None
         self.restart()
@@ -129,8 +135,8 @@ class Game:
         self.ditches_on = tk.BooleanVar()
         self.ditches_on.set(False)
 
-        self.chaser_diag = tk.BooleanVar()
-        self.chaser_diag.set(True)
+        self.enemy_diag = tk.BooleanVar()
+        self.enemy_diag.set(True)
 
         self.speedup = tk.BooleanVar()
         self.speedup.set(True)
@@ -146,22 +152,32 @@ class Game:
         Re-initializes all non-option aspects of the game.
         Assumes the keys of the board are all generated.
         """
-        self.populations = dict.fromkeys(self.populations, 0)
+        self.level = -1
+        self.basket = dict.fromkeys(self.populations, 0)
 
+        # Initialize the player:
         self.pos = Pair(self.width // 2, self.width // 2)
         self.targets = []
         self.trail = []
         self.stuck = False
+        self.populations[self.player_tile().key.get()] -= 1
+        self.player_tile().key.set(self.__get_face_key('player'))
 
+        # Initialize the chaser:
         if self.chaser is not None:
-            self.__shuffle_tile(self.tile_at_chaser())
+            self.__shuffle_tile(self.chaser_tile())
         self.chaser = Pair(0, 0)
-        self.level = -1
-        self.basket = dict.fromkeys(self.populations, 0)
+        self.populations[self.chaser_tile().key.get()] -= 1
+        self.chaser_tile().key.set(self.__get_face_key('chaser'))
+
+        # Initialize the nommer:
+        if self.nommer is not None:
+            self.__shuffle_tile(self.nommer_tile())
+        self.nommer = Pair(self.width-1, self.width-1)
+        self.populations[self.chaser_tile().key.get()] -= 1
+        self.chaser_tile().key.set(self.__get_face_key('chaser'))
 
         # Generate the first round's targets:
-        self.tile_at_chaser().key.set(self.get_face_key('chaser'))
-        self.tile_at_pos().key.set(self.get_face_key('player'))
         self.check_round_complete()
 
     def tile_at(self, pos: Pair):
@@ -173,13 +189,16 @@ class Game:
         else:
             return None
 
-    def tile_at_pos(self):
+    def player_tile(self):
         """ Just as a readability aid. """
         return self.grid[self.width * self.pos.y + self.pos.x]
 
-    def tile_at_chaser(self):
+    def chaser_tile(self):
         """ Just as a readability aid. """
         return self.tile_at(self.chaser)
+
+    def nommer_tile(self):
+        return self.tile_at(self.nommer)
 
     def __adjacent(self, pos: Pair):
         """
@@ -202,18 +221,21 @@ class Game:
         If the user is in a position from the last round's trail,
         they must first press any key to get unstuck.
 
+        Built into the fact that the chaser and nommer keys are
+        not single characters, the player cannot move onto them.
+
         Returns whether the player completed a round with this move.
         """
         # The player wants to backtrack:
         if key == 'space' and self.trail:
-            self.__shuffle_tile(self.tile_at_pos())
+            self.__shuffle_tile(self.player_tile())
             popped = self.trail.pop(-1)
             self.pos = popped.pos
             self.populations[popped.key.get()] -= 1
-            popped.key.set(self.get_face_key('player'))
+            popped.key.set(self.__get_face_key('player'))
             return
 
-        tile = self.tile_at_pos()
+        tile = self.player_tile()
         # The player just walked into their trail last move:
         if tile in self.trail and self.stuck:
             self.stuck = False
@@ -233,11 +255,11 @@ class Game:
             select = select[0]
 
             self.__shuffle_tile(tile)
-            self.trail.append(self.tile_at_pos())
+            self.trail.append(self.player_tile())
             self.pos = adj[select]
             self.populations[select.key.get()] -= 1
             select_key = select.key.get()
-            select.key.set(self.get_face_key('player'))
+            select.key.set(self.__get_face_key('player'))
 
             if select in self.trail and self.ditches_on.get():
                 self.stuck = True
@@ -310,7 +332,7 @@ class Game:
             target = weighted_choice(self.populations)
             self.targets = list(filter(
                 lambda t: t.key.get() == target and
-                t is not self.tile_at_pos(),
+                t is not self.player_tile(),
                 self.grid))
         elif self.keygen_mode.get() == 'random':
             # Get an appropriate number
@@ -330,7 +352,7 @@ class Game:
         Returns True if the chaser is on the player.
         """
         # The chaser changes keys in its wake:
-        self.__shuffle_tile(self.tile_at_chaser())
+        self.__shuffle_tile(self.chaser_tile())
 
         diff = self.pos - self.chaser
         if diff.x < -1:
@@ -342,7 +364,7 @@ class Game:
         if diff.y > 1:
             diff.y = 1
         # The user can disable chaser diagonals:
-        if diff.x != 0 and diff.y != 0 and not self.chaser_diag.get():
+        if diff.x != 0 and diff.y != 0 and not self.enemy_diag.get():
             if weighted_choice(
                     {True: abs(diff.x),
                      False: abs(diff.y)}):
@@ -351,13 +373,24 @@ class Game:
                 diff.y = 0
         self.chaser += diff
 
-        tile = self.tile_at_chaser()
+        tile = self.chaser_tile()
         if tile.key.get() in self.populations:
             self.populations[tile.key.get()] -= 1
-        tile.key.set(self.get_face_key('chaser'))
+        tile.key.set(self.__get_face_key('chaser'))
         return self.chaser == self.pos
 
-    def chaser_speed(self):
+    def move_nommer(self):
+        """
+        Rules:
+        Moves after the chaser has moved and does NOT touch the chaser.
+        If a target is in a certain radius, move toward it.
+        Otherwise, move towards a tile a certain distance
+            from the player in the direction of their recent
+            trajectory. Do NOT touch the player.
+        """
+        pass  # TODO
+
+    def enemy_speed(self):
         """
         Returns a speed in tiles per second
         """
@@ -370,7 +403,7 @@ class Game:
         slowness = 32
         return (high - low) * (1 - (2 ** -(level / slowness))) + low
 
-    def get_face_key(self, face: str):
+    def __get_face_key(self, face: str):
         face = Game.faces[face]
         return face[0]+'\''+face[1:] if \
             self.sad_mode.get() else face
@@ -459,7 +492,7 @@ class SnaKeyGUI(tk.Tk):
 
         self.restart = tk.Button(
             self, text='restart', command=restart,
-            activebackground='gainsboro',
+            activebackground='whiteSmoke',
         )
         self.restart.pack()
 
@@ -476,7 +509,7 @@ class SnaKeyGUI(tk.Tk):
         options = tk.Menu(menu_bar)
         for name, var in {
                 'ditches':      self.game.ditches_on,
-                'chaser diag':  self.game.chaser_diag,
+                'enemy diag':   self.game.enemy_diag,
                 'speedup':      self.game.speedup,
                 'sad mode':     self.game.sad_mode, }.items():
             options.add_checkbutton(
@@ -513,7 +546,7 @@ class SnaKeyGUI(tk.Tk):
         representation and make the corresponding display
         changes to the GUI for the player to see.
         """
-        init_pos = self.game.tile_at_pos()
+        init_pos = self.game.player_tile()
         # Execute the move in the internal representation
         round_over = self.game.move(event.keysym)
         init_pos.color(self.cs['trail'])
@@ -524,7 +557,7 @@ class SnaKeyGUI(tk.Tk):
             self.update_cs()
 
         # Highlight new position tile:
-        self.game.tile_at_pos().color(self.cs['pos'])
+        self.game.player_tile().color(self.cs['pos'])
 
     def update_cs(self, cs: str = None):
         """
@@ -543,7 +576,7 @@ class SnaKeyGUI(tk.Tk):
             tile.color(cs['tile'])
 
         # Highlight the player's current position:
-        self.game.tile_at_pos().color(cs['pos'])
+        self.game.player_tile().color(cs['pos'])
 
         # Highlight tiles from the player's trail:
         for tile in self.game.trail:
@@ -555,14 +588,17 @@ class SnaKeyGUI(tk.Tk):
             tile.color(cs['target'])
 
         # Highlight the chaser's current position:
-        self.game.tile_at_chaser().color(cs['chaser'])
+        self.game.chaser_tile().color(cs['chaser'])
 
     def move_chaser(self):
         """
         Moves the chaser toward the player
         and displays the changes in the GUI.
         """
-        tile = self.game.tile_at_chaser()
+        # TODO: remove debug line:
+        print(sum(self.game.populations.values()), self.game.populations)
+
+        tile = self.game.chaser_tile()
         if tile in self.game.targets:
             tile.color(self.cs['target'])
         elif tile in self.game.trail:
@@ -573,24 +609,30 @@ class SnaKeyGUI(tk.Tk):
         # Move the chaser in the internal representation:
         if self.game.move_chaser():
             # The chaser caught the player:
-            self.game.tile_at_chaser().color(self.cs['chaser'])
+            self.game.chaser_tile().color(self.cs['chaser'])
             self.game_over()
             return
         else:
             # Loop the chaser while it
             # hasn't caught the player.
-            self.game.tile_at_chaser().color(self.cs['chaser'])
+            self.game.chaser_tile().color(self.cs['chaser'])
             self.chaser_cancel_id = self.after(
-                int(1000 / self.game.chaser_speed()),
+                int(1000 / self.game.enemy_speed()),
                 func=self.move_chaser
             )
+
+    def move_nommer(self):
+        """
+
+        """
+        pass  # TODO
 
     def game_over(self):
         """
         Shows the player's score and then restarts the game.
         """
         # TODO: show the score:
-        for _ in range(5):
+        for _ in range(3):
             self.restart.flash()
         print('game over!', self.game.basket)
 
