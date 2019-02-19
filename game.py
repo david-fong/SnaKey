@@ -1,4 +1,5 @@
-from time import process_time
+from random import choice
+
 from webcolors import hex_to_rgb, name_to_hex, rgb_to_hex
 
 from pair import *
@@ -15,13 +16,10 @@ class Tile:
         self.key = tk.StringVar()
         self.key.set(key)
         self.label: tk.Label = None
-        self.ditch = False
         self.canvas_id = None
 
     def color(self, cs: dict):
         """ cs follows {'bg': _, 'text': _} """
-        if self.ditch:
-            cs = Tile.shade(cs)
         self.label.configure(cs)
 
     @staticmethod
@@ -65,61 +63,113 @@ class Game:
     """
     Attributes:
     -- width        : int               : The length of both the grid's sides in tiles.
-    -- ditches_on   : bool              : Whether the player wants to turn on ditches.
     -- populations  : dict{str: int}    : Map from all keys to their #instances in the grid.
                                            The sum of the values should always be width ** 2.
+
     -- grid         : list{list{Tile}}  : (0, 0) is at the top left of the screen.
     -- pos          : Pair              : The player's current position.
     -- targets      : list{Tile}        : tiles containing the target letter for a round.
     -- trail        : set{Tile}         : tiles the player has visited in a round.
+    -- stuck        : bool              : Whether the Player entered their trail in the last move.
+
+    -- ditches_on   : BooleanVar        : Whether the player wants to turn on ditches.
+    -- chaser_diag  : BooleanVar        : Whether the chaser can move in diagonals.
+    -- speedup      : BooleanVar        : Whether the chaser will speed up when finishing a round.
+    -- keygen_mode  : StringVar         : How to choose keys for a round. same letter? random?
 
     -- chaser:      : Pair              : The position of an enemy chaser
-    -- level:       : float             : number of levels completed by the player.
+    -- level        : int               : number of levels completed by the player.
     -- basket       : dict{str: int}    : total times obtained for each letter.
     -- start        : float             : process time of the start of a round.
     """
     LOWERCASE = {key for key in 'abcdefghijklmnopqrstuvwxyz'}
-    chaser_key = '!'
+    chaser_key = ':>'
+    player_key = ':|'
 
     def __init__(self, width: int, keyset: set = None):
         """
 
         """
+        # Create grid:
         self.width = width
-        self.ditches_on = tk.BooleanVar()
-        self.ditches_on.set(False)
+        self.grid = []
+        for y in range(width):
+            self.grid.extend(
+                [Tile(Pair(x, y)) for
+                 x in range(width)])
 
+        # initialize letters with random, balanced keys:
         if keyset is None:
             keyset = Game.LOWERCASE
         self.populations = dict.fromkeys(keyset, 0)
-        self.grid = []
-        for y in range(width):
-            self.grid.extend([Tile(Pair(x, y)) for x in range(width)])
-
-        # initialize letters with random, balanced keys
         for tile in self.grid:
             self.__shuffle_tile(tile)
 
+        # Initialize game-play options:
+        self.__setup_options()
+
         # Initialize fields:
-        self.pos:       Pair = None
-        self.targets:   list = None
-        self.trail:     set = None
-        self.chaser:    Pair = None
-        self.level:     int = None
-        self.basket:    dict = None
+        self.pos: Pair = None
+        self.targets: list = None
+        self.trail: set = None
+        self.stuck: bool = None
+        self.chaser: Pair = None
+        self.level: int = None
+        self.basket: dict = None
         self.restart()
+
+    def __setup_options(self):
+        """
+        Initialize options fields
+        for the menu-bar in the GUI.
+        """
+        self.ditches_on = tk.BooleanVar()
+        self.ditches_on.set(False)
+
+        self.chaser_diag = tk.BooleanVar()
+        self.chaser_diag.set(True)
+
+        self.speedup = tk.BooleanVar()
+        self.speedup.set(True)
+
+        self.keygen_mode = tk.StringVar()
+        self.keygen_mode.set('letter')
+
+    def restart(self):
+        """
+        Re-initializes all non-option aspects of the game.
+        Assumes the keys of the board are all generated.
+        """
+        self.populations = dict.fromkeys(self.populations, 0)
+
+        self.pos = Pair(self.width // 2, self.width // 2)
+        self.targets = []
+        self.trail = set()
+        self.stuck = False
+
+        if self.chaser is not None:
+            self.__shuffle_tile(self.tile_at_chaser())
+        self.chaser = Pair(0, 0)
+        self.level = -1
+        self.basket = dict.fromkeys(self.populations, 0)
+
+        # Generate the first round's targets:
+        self.tile_at_chaser().key.set(Game.chaser_key)
+        self.tile_at_pos().key.set(Game.player_key)
+        self.check_round_complete()
 
     def tile_at(self, pos: Pair):
         """
         Returns the tile at the given Pair coordinate.
         """
         if pos.in_range(self.width, self.width):
-            return self.grid[self.width*pos.y + pos.x]
+            return self.grid[self.width * pos.y + pos.x]
         else:
             return None
 
     def tile_at_pos(self):
-        return self.grid[self.width*self.pos.y + self.pos.x]
+        """ Just as a readability aid. """
+        return self.grid[self.width * self.pos.y + self.pos.x]
 
     def tile_at_chaser(self):
         """ Just as a readability aid. """
@@ -148,11 +198,11 @@ class Game:
 
         Returns whether the player completed a round with this move.
         """
-        pos = self.tile_at_pos()
-        if pos.ditch:
+        tile = self.tile_at_pos()
+        if tile in self.trail and self.stuck:
             # No movement is possible when the player
             # is in a ditch that hasn't been cleared.
-            pos.ditch = False
+            self.stuck = False
             return False
         elif key not in self.populations.keys():
             return False  # Ignore keys not in the grid.
@@ -160,19 +210,29 @@ class Game:
         # A dict from adjacent tiles to their positions:
         adj = self.__adjacent(self.pos)
         # Adjacent tiles with the same key as the key parameter:
-        select = list(filter(lambda tile: tile.key.get() == key, adj))
-        if select:  # If an adjacent key has a matching key:
-            self.trail |= {self.tile_at_pos()}
+        select = list(filter(lambda t: t.key.get() == key, adj))
+
+        # If the user pressed a key
+        # corresponding to an adjacent tile:
+        if select:
             # The selected tile to move to:
             select = select[0]
+
+            self.__shuffle_tile(tile)
+            self.trail |= {self.tile_at_pos()}
             self.pos = adj[select]
+            self.populations[select.key.get()] -= 1
+            select_key = select.key.get()
+            select.key.set(Game.player_key)
+
+            if select in self.trail and self.ditches_on.get():
+                self.stuck = True
             if select in self.targets:
                 self.targets.remove(select)
-                self.basket[select.key.get()] += 1
-            # debug: print(self.pos, select.key.get())
-            return self.check_round_complete()
-        else:
-            return False
+                self.basket[select_key] += 1
+                return self.check_round_complete()
+
+        return False
 
     def __wide_adjacent(self, tile: Tile):
         """
@@ -189,6 +249,13 @@ class Game:
             adj.remove(None)
         return {t.key.get() for t in adj}
 
+    def __targets_per_round(self):
+        """
+        Average expected number of targets per round,
+        assuming balanced populations of keys in the grid.
+        """
+        return self.width ** 2 / len(self.populations)
+
     def __shuffle_tile(self, tile: Tile):
         """
         Randomizes the parameter tile's key,
@@ -201,7 +268,7 @@ class Game:
         lower = min(self.populations.values())
         adj = self.__wide_adjacent(tile)
         weights = {  # Gives zero weight to neighboring keys.
-            key: 1 / (count - lower + 1) if key not in adj else 0
+            key: 4 ** (lower - count) if key not in adj else 0
             for key, count in self.populations.items()}
 
         new_key = weighted_choice(weights)
@@ -219,23 +286,27 @@ class Game:
             # all tiles with the target key.
             return False
 
-        self.level += 1  # This makes the chaser move faster
+        # This makes the chaser move faster
+        if self.speedup.get():
+            self.level += 1
 
-        # Get the new target key and
-        # find tiles with matching keys:
-        target = weighted_choice(self.populations)
-        self.targets.clear()
-        for tile in self.grid:
-            tile.ditch = False
-            if (tile.key.get() == target and
-                    tile is not self.tile_at_pos()):
-                self.targets.append(tile)
-        # debug = self.targets = [self.targets[-1], ]
+        if self.keygen_mode.get() == 'letter':
+            # Get the new target key and
+            # find tiles with matching keys:
+            target = weighted_choice(self.populations)
+            self.targets = list(filter(
+                lambda t: t.key.get() == target and
+                t is not self.tile_at_pos(),
+                self.grid))
+        elif self.keygen_mode.get() == 'random':
+            # Get an appropriate number
+            # of random keys for targets:
+            while len(self.targets) < self.__targets_per_round():
+                target = choice(self.grid)
+                if target not in self.targets:
+                    self.targets.append(target)
+        # debug = self.targets = choice(self.targets)
 
-        # Raise ditch flags for
-        # trail tiles from this round:
-        for tile in self.trail:
-            tile.ditch = self.ditches_on.get()
         self.trail.clear()
         return True
 
@@ -256,6 +327,14 @@ class Game:
             diff.y = -1
         if diff.y > 1:
             diff.y = 1
+        # The user can disable chaser diagonals:
+        if diff.x != 0 and diff.y != 0 and not self.chaser_diag.get():
+            if weighted_choice(
+                    {True: abs(diff.x),
+                     False: abs(diff.y)}):
+                diff.x = 0
+            else:
+                diff.y = 0
         self.chaser += diff
 
         tile = self.tile_at_chaser()
@@ -267,31 +346,14 @@ class Game:
         """
         Returns a speed in tiles per second
         """
-        f = self.width ** 2 / len(self.populations)
-        sub_level = 2 ** -(len(self.targets) / 0.3 / f)
+        sub_level = 2 ** -(len(self.targets) / 0.3 /
+                           self.__targets_per_round())
         level = self.level + sub_level
 
         high = 2.5  # Tiles per second
-        low = 0.25  # Tiles per second
-        return (high-low)*(1 - (2 ** -(level/25))) + low
-
-    def restart(self):
-        """
-        Resets the game.
-        """
-        self.populations = dict.fromkeys(self.populations, 0)
-
-        self.pos = Pair(self.width // 2, self.width // 2)
-        self.targets = []
-        self.trail = set()
-
-        if self.chaser is not None:
-            self.__shuffle_tile(self.tile_at_chaser())
-        self.chaser = Pair(0, 0)
-        self.tile_at_chaser().key.set(Game.chaser_key)
-        self.level = -1
-        self.basket = dict.fromkeys(self.populations, 0)
-        self.check_round_complete()
+        low = 0.30  # Tiles per second
+        slowness = 32
+        return (high - low) * (1 - (2 ** -(level / slowness))) + low
 
 
 class SnaKeyGUI(tk.Tk):
@@ -303,28 +365,28 @@ class SnaKeyGUI(tk.Tk):
     """
     color_schemes = {
         'default': {
-            'lines':    Tile.shade({'bg': 'white'}),
-            'tile':     {'bg': 'white',         'fg': 'black'},
-            'chaser':   {'bg': 'violet',        'fg': 'black'},
-            'target':   {'bg': 'gold',          'fg': 'black'},
-            'pos':      {'bg': 'deepSkyBlue',   'fg': 'black'},
-            'trail':    {'bg': 'powderBlue',    'fg': 'black'},
+            'lines': Tile.shade({'bg': 'white'}),
+            'tile': {'bg': 'white', 'fg': 'black'},
+            'chaser': {'bg': 'violet', 'fg': 'black'},
+            'target': {'bg': 'gold', 'fg': 'black'},
+            'pos': {'bg': 'deepSkyBlue', 'fg': 'black'},
+            'trail': {'bg': 'powderBlue', 'fg': 'black'},
         },
         'matrix': {
-            'lines':    Tile.shade({'bg': 'black'}),
-            'tile':     {'bg': 'black',         'fg': 'lightGrey'},
-            'chaser':   {'bg': 'red',           'fg': 'black'},
-            'target':   {'bg': 'black',         'fg': 'lime'},
-            'pos':      {'bg': 'limeGreen',     'fg': 'black'},
-            'trail':    {'bg': 'darkGreen',     'fg': 'black'},
+            'lines': Tile.shade({'bg': 'black'}),
+            'tile': {'bg': 'black', 'fg': 'lightGrey'},
+            'chaser': {'bg': 'red', 'fg': 'black'},
+            'target': {'bg': 'black', 'fg': 'lime'},
+            'pos': {'bg': 'limeGreen', 'fg': 'black'},
+            'trail': {'bg': 'darkGreen', 'fg': 'black'},
         },
         'sheep :>': {
-            'lines':    Tile.shade({'bg': 'lawnGreen'}),
-            'tile':     {'bg': 'lawnGreen',     'fg': 'darkGreen'},
-            'chaser':   {'bg': 'orangeRed',     'fg': 'white'},
-            'target':   {'bg': 'limeGreen',     'fg': 'black'},
-            'pos':      {'bg': 'white',         'fg': 'black'},
-            'trail':    {'bg': 'greenYellow',   'fg': 'darkGreen'},
+            'lines': Tile.shade({'bg': 'lawnGreen'}),
+            'tile': {'bg': 'lawnGreen', 'fg': 'darkGreen'},
+            'chaser': {'bg': 'orangeRed', 'fg': 'white'},
+            'target': {'bg': 'limeGreen', 'fg': 'black'},
+            'pos': {'bg': 'white', 'fg': 'black'},
+            'trail': {'bg': 'greenYellow', 'fg': 'darkGreen'},
         },
     }
     pad = 1
@@ -341,7 +403,7 @@ class SnaKeyGUI(tk.Tk):
                 tile = self.game.tile_at(Pair(x, y))
                 tile.label = tk.Label(
                     grid, height=1, width=1,
-                    textvariable=tile.key,)
+                    textvariable=tile.key, )
                 tile.label.grid(
                     row=y, column=x, ipadx=3,
                     padx=SnaKeyGUI.pad, pady=SnaKeyGUI.pad)
@@ -365,11 +427,13 @@ class SnaKeyGUI(tk.Tk):
         Sets up buttons to:
         -- Restart the game.
         """
+
         def restart():
             self.game.restart()
             self.update_cs()
             self.after_cancel(self.chaser_cancel_id)
             self.chaser_cancel_id = self.after(2000, self.move_chaser)
+
         self.restart = tk.Button(
             self, text='restart', command=restart,
             activebackground='lightGrey',
@@ -387,24 +451,36 @@ class SnaKeyGUI(tk.Tk):
 
         # Options menu:
         options = tk.Menu(menu_bar)
-        options.add_checkbutton(
-            label='ditches',
-            offvalue=False, onvalue=True,
-            variable=self.game.ditches_on
-        )
+        for name, var in {
+            'ditches': self.game.ditches_on,
+            'chaser diag': self.game.chaser_diag,
+            'speedup': self.game.speedup, }.items():
+            options.add_checkbutton(
+                label=name,
+                offvalue=False,
+                onvalue=True,
+                variable=var, )
         menu_bar.add_cascade(label='options', menu=options)
 
-        # Color menu:
+        # Keygen mode menu:
+        keygen_mode = tk.Menu(menu_bar)
+        for mode in ('letter', 'random'):
+            keygen_mode.add_radiobutton(
+                label=mode, value=mode,
+                variable=self.game.keygen_mode, )
+        menu_bar.add_cascade(label='keygen mode', menu=keygen_mode)
+
+        # Color scheme menu:
         def update_cs(*_):
             self.update_cs(cs_string_var.get())
+
         colors = tk.Menu(menu_bar)
         cs_string_var = tk.StringVar()
         cs_string_var.trace('w', update_cs)
         for scheme in SnaKeyGUI.color_schemes.keys():
             colors.add_radiobutton(
                 label=scheme, value=scheme,
-                variable=cs_string_var
-            )
+                variable=cs_string_var, )
         menu_bar.add_cascade(label='colors', menu=colors)
 
     def move(self, event):
