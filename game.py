@@ -231,7 +231,10 @@ class Game:
         Returns whether the player completed a round with this move.
         """
         # The player wants to backtrack:
-        if key == 'space' and self.trail:
+        if key == 'space':
+            if not self.trail:
+                # There is no trail yet!
+                return
             # Do not allow the player
             # to backtrack onto an enemy:
             if self.trail[-1] not in self.populations:
@@ -251,7 +254,6 @@ class Game:
         elif key not in self.populations:
             return False  # Ignore keys not in the grid.
 
-        # A dict from adjacent tiles to their positions:
         adj = self.__adjacent(self.pos)
         # Adjacent tiles with the same key as the key parameter:
         dest_singleton = list(filter(lambda t: t.key.get() == key, adj))
@@ -382,14 +384,7 @@ class Game:
 
     def move_nommer(self):
         """
-        Rules:
-        If sharing the same clock as the chaser,
-            Moves after the chaser has moved
-            and does NOT touch the chaser.
-        If a target is in a certain radius, move toward it.
-        Otherwise, move towards a tile a certain distance
-            from the player in the direction of their recent
-            trajectory. Do NOT touch the player.
+
         """
         def __targets_in_range(origin: Pair, radius: int):
             """
@@ -406,24 +401,35 @@ class Game:
             adj = [self.tile_at(origin + pair) for pair in adj]
             return list(filter(lambda tile: tile in self.targets, adj))
 
-        # Move toward targets within a quarter grid range:
+        # Move toward targets within a quarter-grid range:
         targets = __targets_in_range(self.nommer, self.width//4)
         if targets:
-            pass  # Find one that doesn't have an enemy on it
-            return
+            diff = targets[0].pos - self.nommer
 
-        # Otherwise, if the player is more than a third
-        # of the grid away, follow the player
-        elif (self.pos - self.nommer).norm() > self.width/3:
-            pass
-            return
+        # Otherwise, if the player is more than
+        # half of the grid away, follow the player:
+        # (Or follow the player if the haven't moved):
+        elif (self.pos - self.nommer).norm() > self.width/3 \
+                or not self.trail:
+            diff = self.pos - self.nommer
 
-        # Follow the player (assuming they are heading for one)
+        # Follow the player to a target
+        # using their trajectory:
         else:
-            def __player_trajectory():
-                pass
-            pass
-            return
+            diff = self.pos.traj(
+                list(map(lambda t: t.pos, self.trail)),
+                hist=5, lookahead=self.width/5) - self.nommer
+
+        diff = self.__enemy_diff(self.nommer, diff.ceil(1))
+        self.__shuffle_tile(self.nommer_tile())
+
+        # Execute the move:
+        self.nommer += diff
+        if self.nommer_tile() in self.targets:
+            self.targets.remove(self.nommer_tile())
+        key_var = self.nommer_tile().key
+        self.populations[key_var.get()] -= 1
+        key_var.set(self.__get_face_key('nommer'))
 
     def __enemy_diff(self, pos: Pair, diff: Pair,
                      can_touch_player: bool = False):
@@ -449,14 +455,14 @@ class Game:
         elif (self.tile_at(pos + diff).key.get()
                 not in self.populations):
             # Find a random free tile to move to:
-            adj = self.__adjacent(pos)
+            adj = list(self.__adjacent(pos))
             popped = choice(adj)
-            adj.remove(choice)
+            adj.remove(popped)
             while adj:
                 if popped.key.get() in self.populations:
                     break
                 popped = choice(adj)
-                adj.remove(choice)
+                adj.remove(popped)
             return popped.pos - pos
         # Everything is fine:
         else:
@@ -477,8 +483,10 @@ class Game:
 
     def __get_face_key(self, face: str):
         face = Game.faces[face]
-        return face[0]+'\''+face[1:] if \
-            self.sad_mode.get() else face
+        if self.sad_mode.get():
+            return face.replace(':', ':\'')
+        else:
+            return face
 
 
 class SnaKeyGUI(tk.Tk):
@@ -493,10 +501,10 @@ class SnaKeyGUI(tk.Tk):
             'lines':    Tile.shade({'bg':       'white'}),
             'tile':     {'bg': 'white',         'fg': 'black'},
             'chaser':   {'bg': 'violet',        'fg': 'black'},
-            'nommer':   {'bg': 'lime',          'fg': 'black'},
+            'nommer':   {'bg': 'chartreuse',    'fg': 'black'},
             'target':   {'bg': 'gold',          'fg': 'black'},
             'pos':      {'bg': 'deepSkyBlue',   'fg': 'black'},
-            'trail':    {'bg': 'powderBlue',    'fg': 'black'},
+            'trail':    {'bg': 'lightCyan',     'fg': 'black'},
         },
         'matrix': {
             'lines':    Tile.shade({'bg':       'black'}),
@@ -510,8 +518,8 @@ class SnaKeyGUI(tk.Tk):
         'sheep :>': {
             'lines':    Tile.shade({'bg':       'lawnGreen'}),
             'tile':     {'bg': 'lawnGreen',     'fg': 'darkGreen'},
-            'chaser':   {'bg': 'orangeRed',     'fg': 'white'},
-            'nommer':   {'bg': 'orangeRed',     'fg': 'white'},
+            'chaser':   {'bg': 'orangeRed',     'fg': 'black'},
+            'nommer':   {'bg': 'orangeRed',     'fg': 'black'},
             'target':   {'bg': 'limeGreen',     'fg': 'black'},
             'pos':      {'bg': 'white',         'fg': 'black'},
             'trail':    {'bg': 'greenYellow',   'fg': 'darkGreen'},
@@ -549,6 +557,7 @@ class SnaKeyGUI(tk.Tk):
 
         # Start the chaser:
         self.chaser_cancel_id = self.after(2000, self.move_chaser)
+        self.nommer_cancel_id = self.after(2000, self.move_nommer)
 
     def __setup_buttons(self):
         """
@@ -559,8 +568,12 @@ class SnaKeyGUI(tk.Tk):
         def restart():
             self.game.restart()
             self.update_cs()
+
             self.after_cancel(self.chaser_cancel_id)
             self.chaser_cancel_id = self.after(2000, self.move_chaser)
+
+            self.after_cancel(self.nommer_cancel_id)
+            self.nommer_cancel_id = self.after(2000, self.move_nommer)
 
         self.restart = tk.Button(
             self, text='restart', command=restart,
@@ -669,14 +682,7 @@ class SnaKeyGUI(tk.Tk):
         """
         # TODO: remove debug line:
         print(sum(self.game.populations.values()), self.game.populations)
-
-        tile = self.game.chaser_tile()
-        if tile in self.game.targets:
-            tile.color(self.cs['target'])
-        elif tile in self.game.trail:
-            tile.color(self.cs['trail'])
-        else:
-            tile.color(self.cs['tile'])
+        self.__erase_enemy(self.game.chaser_tile())
 
         # Move the chaser in the internal representation:
         if self.game.move_chaser():
@@ -697,7 +703,23 @@ class SnaKeyGUI(tk.Tk):
         """
 
         """
-        pass  # TODO
+        self.__erase_enemy(self.game.nommer_tile())
+
+        self.game.move_nommer()
+
+        self.game.nommer_tile().color(self.cs['nommer'])
+        self.nommer_cancel_id = self.after(
+            int(1000 / self.game.enemy_speed()),
+            func=self.move_nommer
+        )
+
+    def __erase_enemy(self, tile: Tile):
+        if tile in self.game.targets:
+            tile.color(self.cs['target'])
+        elif tile in self.game.trail:
+            tile.color(self.cs['trail'])
+        else:
+            tile.color(self.cs['tile'])
 
     def game_over(self):
         """

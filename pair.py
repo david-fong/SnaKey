@@ -33,6 +33,20 @@ class Pair:
             y = radius
         return Pair(x, y)
 
+    def traj(self, trail: list, hist: int, lookahead: float):
+        """
+        A destination based on a trajectory calculation
+        using the last <hist> moves from trail, to predict
+        the destination by <lookahead> distance.
+
+        trail must not be empty.
+        """
+        if len(trail) < hist:
+            start = trail[0]
+        else:
+            start = trail[-hist]
+        return self + (self - start)*(lookahead/(self - start).norm())
+
     def __abs__(self):
         return Pair(abs(self.x), abs(self.y))
 
@@ -53,6 +67,16 @@ class Pair:
             self.x += other.x
             self.y += other.y
             return self
+        else:
+            return NotImplemented
+
+    def __mul__(self, other):
+        if isinstance(other, int):
+            return Pair(self.x * other, self.y * other)
+        elif isinstance(other, float):
+            x = int(round(self.x * other))
+            y = int(round(self.y * other))
+            return Pair(x, y)
         else:
             return NotImplemented
 
