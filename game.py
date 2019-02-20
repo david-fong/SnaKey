@@ -19,12 +19,17 @@ class Tile:
         """ cs follows {'bg': _, 'text': _} """
         self.label.configure(cs)
 
+    def __repr__(self):
+        return f'{self.key.get()}{self.pos}'
+
 
 def weighted_choice(weights: dict):
     """
-    Values in the weights dict must be of type in or float.
     Returns a key from the weights dict.
     Favors keys with greater value mappings
+
+    Values in weights must be ints or floats.
+    weights must not be empty.
     """
     from random import uniform
     w_choice = uniform(0, sum(weights.values()))
@@ -185,10 +190,10 @@ class Game:
         Returns a set of tiles
         adjacent to, and on top of pos.
         """
-        offsets = []
+        adj = set()
         for y in range(-1, 2):
-            offsets.extend([Pair(x, y) for x in range(-1, 2)])
-        adj = {self.tile_at(pos + offset) for offset in offsets}
+            adj |= {self.tile_at(pos+Pair(x, y))
+                    for x in range(-1, 2)}
         if None in adj:
             adj.remove(None)
         return adj
@@ -333,7 +338,7 @@ class Game:
                 if target not in self.targets and \
                         target.key.get() in self.populations:
                     self.targets.append(target)
-        # debug = self.targets = choice(self.targets)
+        debug = self.targets = [choice(self.targets), ]
 
         self.trail.clear()
         return True
@@ -361,6 +366,8 @@ class Game:
         """
 
         """
+        hist = 5
+
         def __targets_in_range(origin: Pair, radius: int):
             """
             Returns a list of targets within radius tiles
@@ -370,33 +377,29 @@ class Game:
             adj = []
             for y in range(-radius, radius+1):
                 adj.extend(
-                    [Pair(x, y) for x in
-                     range(-radius, radius+1)])
-            adj.sort(key=Pair.__abs__)
-            adj = [self.tile_at(origin + pair) for pair in adj]
+                    [self.tile_at(origin + Pair(x, y))
+                     for x in range(-radius, radius+1)])
             return list(filter(lambda tile: tile in self.targets, adj))
-
-        # Move toward targets within a quarter-grid range:
-        targets = __targets_in_range(self.nommer, self.width//4)
+        # Move toward targets within a range
+        # of nommer, or of the player:
+        targets = __targets_in_range(self.nommer, 5)
+        targets.extend(__targets_in_range(self.pos, 5))
+        targets.sort(key=lambda t: (t.pos-self.nommer).norm())
         if targets:
             diff = targets[0].pos - self.nommer
 
-        # Otherwise, if the player is more than
-        # half of the grid away, follow the player:
-        # (Or follow the player if the haven't moved):
-        elif (self.pos - self.nommer).norm() > self.width/3 \
-                or not self.trail:
+        # If no targets are near nommer or the player,
+        # predict a target location using the player's
+        # trajectory, and try to beat them to it:
+        elif not self.trail or len(self.trail) < hist:
             diff = self.pos - self.nommer
-
-        # Follow the player to a target
-        # using their trajectory:
         else:
-            diff = self.pos.traj(
-                list(map(lambda t: t.pos, self.trail)),
-                hist=5, lookahead=self.width/5) - self.nommer
-            if not diff.in_bound(self.width, self.width):
-                diff = Pair(0, 0)
+            diff = self.pos - self.trail[-1]
+            for i in range(-hist, 0):
+                diff += self.trail[i+1] - self.trail[i]
+            diff = self.pos + diff * (sqrt((self.pos-self.nommer).norm())/hist)
 
+        # Truncate the desired move and modify if illegal:
         diff = self.__enemy_diff(self.nommer, diff.ceil(1))
         self.__shuffle_tile(self.nommer_tile())
 
@@ -409,7 +412,7 @@ class Game:
         key_var.set(self.__get_face_key('nommer'))
         return self.check_round_complete()
 
-    def __enemy_diff(self, pos: Pair, diff: Pair,
+    def __enemy_diff(self, origin: Pair, diff: Pair,
                      can_touch_player: bool = False):
         """
         Applies the following changes:
@@ -427,21 +430,29 @@ class Game:
                 diff.y = 0
 
         # Allow enemies like the chaser to touch the player:
-        if pos + diff == self.pos and can_touch_player:
+        if origin + diff == self.pos and can_touch_player:
             return diff
+
         # If the enemy would touch another enemy or the player:
-        elif (self.tile_at(pos + diff).key.get()
+        if (not (origin + diff).in_bound(self.width, self.width) or
+                self.tile_at(origin + diff).key.get()
                 not in self.populations):
-            # Find a random free tile to move to:
-            adj = list(self.__adjacent(pos))
-            popped = choice(adj)
-            adj.remove(popped)
-            while adj:
-                if popped.key.get() in self.populations:
-                    break
-                popped = choice(adj)
-                adj.remove(popped)
-            return popped.pos - pos
+            # Find all possible substitutes:
+            adj = list(filter(
+                lambda t: t.key.get() in self.populations,
+                self.__adjacent(origin)))
+            # Restrict to D-pad movement if necessary:
+            if not self.enemy_diag.get():
+                adj = list(filter(
+                    lambda t: t.pos.x - origin.x == 0
+                    or t.pos.y - origin.y == 0, adj))
+
+            # Favor substitutes in similar direction to that desired:
+            weights = {t: 4**-(origin + diff*2 - t.pos).norm()
+                       for t in adj[1:]}
+            popped = weighted_choice(weights)
+            return popped.pos - origin
+
         # Everything is fine:
         else:
             return diff
