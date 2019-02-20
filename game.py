@@ -533,6 +533,15 @@ class SnaKeyGUI(tk.Tk):
             'pos':      {'bg': 'white',         'fg': 'black'},
             'trail':    {'bg': 'greenYellow',   'fg': 'darkGreen'},
         },
+        'pac-man': {
+            'lines':    {'bg': 'darkBlue', },
+            'tile':     {'bg': 'black',         'fg': 'yellow'},
+            'chaser':   {'bg': 'red',           'fg': 'black'},
+            'nommer':   {'bg': 'cyan',          'fg': 'black'},
+            'target':   {'bg': 'cornSilk',      'fg': 'black'},
+            'pos':      {'bg': 'yellow',        'fg': 'black'},
+            'trail':    {'bg': '#1c1c1c',       'fg': 'seashell'},
+        },
     }
     pad = 1
 
@@ -555,14 +564,14 @@ class SnaKeyGUI(tk.Tk):
         self.grid = grid
         grid.pack()
 
-        # Setup the colors:
-        self.cs = SnaKeyGUI.color_schemes['default']
-        self.update_cs()
-
         # Bind key-presses and setup the menu:
         self.__setup_buttons()
         self.bind('<Key>', self.move)
         self.__setup_menu()
+
+        # Setup the colors:
+        self.cs = SnaKeyGUI.color_schemes['default']
+        self.update_cs()
 
         # Start the chaser:
         self.chaser_cancel_id = self.after(2000, self.move_chaser)
@@ -586,7 +595,10 @@ class SnaKeyGUI(tk.Tk):
 
         # Setup the restart button:
         self.restart = tk.Button(
-            bar, text='restart', command=restart,
+            bar,
+            text='restart',
+            command=restart,
+            relief='ridge', bd=1,
             activebackground='whiteSmoke',
         )
         self.restart.grid(row=0, column=0)
@@ -675,22 +687,23 @@ class SnaKeyGUI(tk.Tk):
             cs = SnaKeyGUI.color_schemes[cs]
             self.cs = cs
 
+        # Recolor the menu:
+        self.restart.configure(bg='SystemButtonFace')
+
         # Recolor all tiles:
         self.grid.configure(cs['lines'])
         for tile in self.game.grid:
             tile.color(cs['tile'])
 
-        # Highlight the player's current position:
-        self.game.player_tile().color(cs['pos'])
-
-        # Highlight tiles from the player's trail:
-        for tile in self.game.trail:
-            tile.color(cs['trail'])
-
         # Highlight tiles that need to be touched
         #  to complete the current round:
         for tile in self.game.targets:
             tile.color(cs['target'])
+
+        # Highlight the player's current position:
+        self.game.player_tile().color(cs['pos'])
+        for tile in self.game.trail:
+            tile.color(cs['trail'])
 
         # Highlight the current positions of enemies:
         self.game.chaser_tile().color(cs['chaser'])
@@ -754,9 +767,8 @@ class SnaKeyGUI(tk.Tk):
         self.after_cancel(self.chaser_cancel_id)
         self.after_cancel(self.nommer_cancel_id)
 
-        # Flash the restart button:
-        for _ in range(3):
-            self.restart.flash()
+        # Highlight the restart button:
+        self.restart.configure(bg='white')
         print('game over!', self.game.basket)
 
 
