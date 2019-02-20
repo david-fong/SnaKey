@@ -338,7 +338,7 @@ class Game:
                 if target not in self.targets and \
                         target.key.get() in self.populations:
                     self.targets.append(target)
-        debug = self.targets = [choice(self.targets), ]
+        # debug = self.targets = [choice(self.targets), ]
 
         self.trail.clear()
         return True
@@ -351,10 +351,10 @@ class Game:
         # The chaser changes keys in its wake:
         self.__shuffle_tile(self.chaser_tile())
 
-        diff = (self.pos - self.chaser).ceil(radius=1)
         self.chaser += self.__enemy_diff(
-            self.chaser, diff, can_touch_player=True
-        )
+            self.chaser,
+            target=self.pos,
+            can_touch_player=True)
         key_var = self.chaser_tile().key
         if key_var.get() in self.populations:
             # If the chaser did not land on the player:
@@ -362,12 +362,11 @@ class Game:
         key_var.set(self.__get_face_key('chaser'))
         return self.chaser == self.pos
 
-    def move_nommer(self):
+    def move_nommer(self, hist: int = 5):
         """
-
+        hist is the number of the most recent player moves
+        used to determine the player's trajectory.
         """
-        hist = 5
-
         def __targets_in_range(origin: Pair, radius: int):
             """
             Returns a list of targets within radius tiles
@@ -386,25 +385,26 @@ class Game:
         targets.extend(__targets_in_range(self.pos, 5))
         targets.sort(key=lambda t: (t.pos-self.nommer).norm())
         if targets:
-            diff = targets[0].pos - self.nommer
-
+            dest = targets[0].pos
         # If no targets are near nommer or the player,
         # predict a target location using the player's
         # trajectory, and try to beat them to it:
         elif not self.trail or len(self.trail) < hist:
-            diff = self.pos - self.nommer
+            dest = self.pos
         else:
-            diff = self.pos - self.trail[-1]
+            dest = self.pos - self.trail[-1].pos
             for i in range(-hist, 0):
-                diff += self.trail[i+1] - self.trail[i]
-            diff = self.pos + diff * (sqrt((self.pos-self.nommer).norm())/hist)
+                dest += self.trail[i+1].pos - self.trail[i].pos
+            dest = dest * (sqrt((self.pos-self.nommer).norm())/hist)
 
         # Truncate the desired move and modify if illegal:
-        diff = self.__enemy_diff(self.nommer, diff.ceil(1))
         self.__shuffle_tile(self.nommer_tile())
 
         # Execute the move:
-        self.nommer += diff
+        self.nommer += self.__enemy_diff(
+            origin=self.nommer,
+            target=dest,
+            can_touch_player=False)
         if self.nommer_tile() in self.targets:
             self.targets.remove(self.nommer_tile())
         key_var = self.nommer_tile().key
@@ -412,19 +412,39 @@ class Game:
         key_var.set(self.__get_face_key('nommer'))
         return self.check_round_complete()
 
-    def __enemy_diff(self, origin: Pair, diff: Pair,
+    @staticmethod
+    def __get_diff(origin: Pair, target: Pair):
+        diff = abs(target - origin)
+        axis_percent = abs(diff.x-diff.y) / (diff.x+diff.y)
+        diff = target - origin
+        if weighted_choice({
+                True: axis_percent,
+                False: 1 - axis_percent}):
+            if abs(diff.x) > abs(diff.y):
+                diff.y = 0
+            else:
+                diff.x = 0
+        return diff.ceil(radius=1)
+
+    def __enemy_diff(self, origin: Pair, target: Pair,
                      can_touch_player: bool = False):
         """
+        target is the position of the tile
+        targeted by the enemy at origin.
+
         Applies the following changes:
         -- optionally projecting enemy diagonal moves onto axes.
         -- avoiding other enemies (and possibly the player).
 
-        Assumes that the enemy at pos
+        Assumes that the enemy at origin
         currently has no position on the grid.
         """
+        # Get the offset in the direction of target:
+        diff = self.__get_diff(origin, target)
+
+        # If the player disabled enemy_diag:
         if not self.enemy_diag.get():
-            if weighted_choice({True:  abs(diff.x),
-                                False: abs(diff.y)}):
+            if weighted_choice({True: abs(diff.x), False: abs(diff.y)}):
                 diff.x = 0
             else:
                 diff.y = 0
@@ -434,8 +454,8 @@ class Game:
             return diff
 
         # If the enemy would touch another enemy or the player:
-        if (not (origin + diff).in_bound(self.width, self.width) or
-                self.tile_at(origin + diff).key.get()
+        if (self.tile_at(origin+diff) is None or
+                self.tile_at(origin+diff).key.get()
                 not in self.populations):
             # Find all possible substitutes:
             adj = list(filter(
@@ -497,10 +517,10 @@ class SnaKeyGUI(tk.Tk):
         },
         'matrix': {
             'lines':    {'bg': '#1c1c1c', },
-            'tile':     {'bg': 'black',         'fg': 'lightGrey'},
+            'tile':     {'bg': 'black',         'fg': 'darkGrey'},
             'chaser':   {'bg': 'red',           'fg': 'black'},
             'nommer':   {'bg': 'red',           'fg': 'black'},
-            'target':   {'bg': 'black',         'fg': 'lime'},
+            'target':   {'bg': 'black',         'fg': 'greenYellow'},
             'pos':      {'bg': 'limeGreen',     'fg': 'black'},
             'trail':    {'bg': 'darkGreen',     'fg': 'black'},
         },
