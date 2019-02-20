@@ -4,10 +4,12 @@ from math import sqrt
 class Pair:
     """
     Represents a position in 2D grid space.
+    All arguments or their contents must be integers.
     """
-    def __init__(self, x: int = 0, y: int = 0):
+    def __init__(self, x=0, y: int = 0):
         if isinstance(x, tuple):
-            pass
+            self.x = x[0]
+            self.y = x[1]
         elif isinstance(x, int) and isinstance(y, int):
             self.x = x
             self.y = y
