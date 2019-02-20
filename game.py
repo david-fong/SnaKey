@@ -14,7 +14,6 @@ class Tile:
         self.key = tk.StringVar()
         self.key.set(key)
         self.label: tk.Label = None
-        self.canvas_id = None
 
     def color(self, cs: dict):
         """ cs follows {'bg': _, 'text': _} """
@@ -101,7 +100,7 @@ class Game:
         self.stuck:     bool = None
         self.chaser:    Pair = None
         self.nommer:    Pair = None
-        self.level:      int = None
+        self.level = tk.IntVar()
         self.basket:    dict = None
         self.restart()
 
@@ -130,7 +129,7 @@ class Game:
         Re-initializes all non-option aspects of the game.
         Assumes the keys of the board are all generated.
         """
-        self.level = -1
+        self.level.set(-1)
         self.basket = dict.fromkeys(self.populations, 0)
 
         # Initialize the player:
@@ -317,7 +316,7 @@ class Game:
 
         # This makes the chaser move faster
         if self.speedup.get():
-            self.level += 1
+            self.level.set(self.level.get() + 1)
 
         if self.keygen_mode.get() == 'letter':
             # Get the new target key and
@@ -332,7 +331,7 @@ class Game:
             while len(self.targets) < self.__targets_per_round():
                 target = choice(self.grid)
                 if target not in self.targets and \
-                        target in self.populations:
+                        target.key.get() in self.populations:
                     self.targets.append(target)
         # debug = self.targets = choice(self.targets)
 
@@ -395,6 +394,8 @@ class Game:
             diff = self.pos.traj(
                 list(map(lambda t: t.pos, self.trail)),
                 hist=5, lookahead=self.width/5) - self.nommer
+            if not diff.in_bound(self.width, self.width):
+                diff = Pair(0, 0)
 
         diff = self.__enemy_diff(self.nommer, diff.ceil(1))
         self.__shuffle_tile(self.nommer_tile())
@@ -406,6 +407,7 @@ class Game:
         key_var = self.nommer_tile().key
         self.populations[key_var.get()] -= 1
         key_var.set(self.__get_face_key('nommer'))
+        return self.check_round_complete()
 
     def __enemy_diff(self, pos: Pair, diff: Pair,
                      can_touch_player: bool = False):
@@ -450,7 +452,7 @@ class Game:
         """
         sub_level = 2 ** -(len(self.targets) / 0.3 /
                            self.__targets_per_round())
-        level = self.level + sub_level
+        level = self.level.get() + sub_level
 
         high = 2.5  # Tiles per second
         low = 0.30  # Tiles per second
@@ -477,7 +479,7 @@ class SnaKeyGUI(tk.Tk):
             'lines':    {'bg': 'whiteSmoke', },
             'tile':     {'bg': 'white',         'fg': 'black'},
             'chaser':   {'bg': 'violet',        'fg': 'black'},
-            'nommer':   {'bg': 'chartreuse',    'fg': 'black'},
+            'nommer':   {'bg': 'yellowGreen',   'fg': 'black'},
             'target':   {'bg': 'gold',          'fg': 'black'},
             'pos':      {'bg': 'deepSkyBlue',   'fg': 'black'},
             'trail':    {'bg': 'lightCyan',     'fg': 'black'},
@@ -533,13 +535,14 @@ class SnaKeyGUI(tk.Tk):
 
         # Start the chaser:
         self.chaser_cancel_id = self.after(2000, self.move_chaser)
-        self.nommer_cancel_id = self.after(2000, self.move_nommer)
+        self.nommer_cancel_id = self.after(2500, self.move_nommer)
 
     def __setup_buttons(self):
         """
         Sets up buttons to:
         -- Restart the game.
         """
+        bar = tk.Frame(self)
 
         def restart():
             self.game.restart()
@@ -548,16 +551,24 @@ class SnaKeyGUI(tk.Tk):
             self.after_cancel(self.chaser_cancel_id)
             self.chaser_cancel_id = self.after(2000, self.move_chaser)
             self.after_cancel(self.nommer_cancel_id)
-            self.nommer_cancel_id = self.after(2000, self.move_nommer)
+            self.nommer_cancel_id = self.after(2500, self.move_nommer)
 
         # Setup the restart button:
         self.restart = tk.Button(
-            self, text='restart', command=restart,
+            bar, text='restart', command=restart,
             activebackground='whiteSmoke',
         )
-        self.restart.pack()
+        self.restart.grid(row=0, column=0)
 
         # Setup the score label:
+        level_text = tk.Label(bar, text='  level:')
+        level_text.grid(row=0, column=1)
+        level = tk.Label(
+            bar, width=2,
+            textvariable=self.game.level, )
+        level.grid(row=0, column=2)
+
+        bar.pack()
 
     def __setup_menu(self):
         """
@@ -584,7 +595,7 @@ class SnaKeyGUI(tk.Tk):
 
         # Keygen mode menu:
         keygen_mode = tk.Menu(menu_bar)
-        for mode in ('random', 'letter'):
+        for mode in ('random', 'letter', ):
             keygen_mode.add_radiobutton(
                 label=mode, value=mode,
                 variable=self.game.keygen_mode, )
@@ -682,7 +693,9 @@ class SnaKeyGUI(tk.Tk):
         """
         self.__erase_enemy(self.game.nommer_tile())
 
-        self.game.move_nommer()
+        # Perform the move in the internal representation:
+        if self.game.move_nommer():
+            self.update_cs()
 
         self.game.nommer_tile().color(self.cs['nommer'])
         self.nommer_cancel_id = self.after(
