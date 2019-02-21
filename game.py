@@ -55,10 +55,8 @@ class Game:
     -- player       : Pair              : The player's current position.
     -- targets      : list{Tile}        : tiles containing the target letter for a round.
     -- trail        : list{Tile}        : tiles the player has visited in a round.
-    -- stuck        : bool              : Whether the Player entered their trail in the last move.
 
     GAME-PLAY OPTIONS -----------------------------------------------------------------------------
-    -- ditches_on   : BooleanVar        : Whether the player wants to turn on ditches.
     -- enemy_diag   : BooleanVar        : Whether the enemies can move in diagonals.
     -- speedup      : BooleanVar        : Whether the chaser will speed up when finishing a round.
     -- sad_mode     : BooleanVar        : Makes the faces sad. Purely aesthetic.
@@ -106,7 +104,6 @@ class Game:
         self.targets:   list = None
         self.player:    Pair = None
         self.trail:     list = None
-        self.stuck:     bool = None
         self.chaser:    Pair = None
         self.nommer:    Pair = None
         self.runner:    Pair = None
@@ -119,9 +116,6 @@ class Game:
         Initialize options fields
         for the menu-bar in the GUI.
         """
-        self.ditches_on = tk.BooleanVar()
-        self.ditches_on.set(False)
-
         self.enemy_diag = tk.BooleanVar()
         self.enemy_diag.set(True)
 
@@ -148,7 +142,6 @@ class Game:
         self.player = Pair(self.width // 2, self.width // 2)
         self.targets = []
         self.trail = []
-        self.stuck = False
         self.populations[self.player_tile().key.get()] -= 1
         self.player_tile().key.set(self.__get_face_key('player'))
 
@@ -219,8 +212,6 @@ class Game:
         If the key parameter matches one of the adjacent
         tiles' keys, the player moves to that tile's position.
         The tile being moved out of is added to trail.
-        If the user is in a position from the last round's trail,
-        they must first press any key to get unstuck.
 
         Built into the fact that the chaser and nommer keys are
         not single characters, the player cannot move onto them.
@@ -229,12 +220,11 @@ class Game:
         """
         # The player wants to backtrack:
         if key == 'space':
-            if not self.trail:
-                # There is no trail yet!
-                return
-            if self.trail[-1].key.get() not in self.populations:
-                # Do not allow the player
-                # to backtrack onto an enemy:
+            if (
+                    not self.trail or
+                    self.trail[-1].key.get()
+                    not in self.populations):
+                # Fail if trail is empty or is choked by enemy.
                 return
             self.__shuffle_tile(self.player_tile())
             popped = self.trail.pop(-1)
@@ -243,11 +233,7 @@ class Game:
             popped.key.set(self.__get_face_key('player'))
             return
 
-        # The player just walked into their trail last move:
-        if self.player_tile() in self.trail and self.stuck:
-            self.stuck = False
-            return False
-        elif key not in self.populations:
+        if key not in self.populations:
             return False  # Ignore keys not in the grid.
 
         adj = self.__adjacent(self.player)
@@ -263,17 +249,14 @@ class Game:
             self.__shuffle_tile(self.player_tile())
             self.trail.append(self.player_tile())
             self.player = dest.pos
-            self.populations[dest.key.get()] -= 1
-            select_key = dest.key.get()
+            dest_key = dest.key.get()
+            self.populations[dest_key] -= 1
             dest.key.set(self.__get_face_key('player'))
 
-            # Handle ditches if player moved into their trail:
-            if dest in self.trail and self.ditches_on.get():
-                self.stuck = True
             # Handle scoring if player touched a target:
             if dest in self.targets:
                 self.targets.remove(dest)
-                self.basket[select_key] += 1
+                self.basket[dest_key] += 1
                 return self.check_round_complete()
             elif len(self.trail) > sum(self.basket.values()):
                 self.trail.pop(0)
@@ -366,7 +349,7 @@ class Game:
         Moves the chaser closer to the player.
         Returns True if the chaser is on the player.
         """
-        self.chaser += self.__enemy_dest(
+        self.chaser += self.__enemy_diff(
             self.chaser,
             target=self.player,
             can_touch_player=True)
@@ -394,86 +377,83 @@ class Game:
                     [self.tile_at(origin + Pair(x, y))
                      for x in range(-radius, radius+1)])
             return list(filter(lambda tile: tile in self.targets, adj))
-        # Move toward targets within a range
-        # of nommer, or of the player:
-        targets = __targets_in_range(self.nommer, 5)
-        targets.extend(__targets_in_range(self.player, 5))
-        targets.sort(key=lambda t: (t.pos-self.nommer).norm())
-        if targets:
-            dest = targets[0].pos
+        # See if there are targets near nommer or other characters:
+        dest = None
+        for character in (self.nommer, self.chaser, self.runner):
+            targets = __targets_in_range(character, 5)
+            if targets:
+                targets.sort(key=lambda t: (t.pos-self.nommer).norm())
+                dest = targets[0].pos
+                break
+
         # If no targets are near nommer or the player,
         # predict a target location using the player's
         # trajectory, and try to beat them to it:
-        elif not self.trail or len(self.trail) < hist:
-            dest = self.player
-        else:
-            dest = self.player - self.trail[-1].pos
-            for i in range(-hist, 0):
-                dest += self.trail[i+1].pos - self.trail[i].pos
-            dest = dest * (sqrt((self.player - self.nommer).norm()) / hist)
+        if dest is None:
+            # Not enough data. Just chase:
+            if not self.trail or len(self.trail) < hist:
+                dest = self.player
+            else:
+                dest = self.player - self.trail[-1].pos
+                for i in range(-hist, -1):
+                    # Weights of past player moves decrease linearly:
+                    dest += (self.trail[i+1].pos - self.trail[i].pos) * (i+hist)
+                dest *= sqrt((self.player - self.nommer).norm())
+                dest *= 2 / sum(range(1, hist + 1))
+
+                print(dest)
+                dest += self.player
 
         # Execute the move:
-        self.nommer += self.__enemy_dest(
+        self.nommer += self.__enemy_diff(
             origin=self.nommer,
             target=dest,
             can_touch_player=False
         )
         # Nommer may consume targets:
+        key_var = self.nommer_tile().key
         if self.nommer_tile() in self.targets:
             self.targets.remove(self.nommer_tile())
-        key_var = self.nommer_tile().key
+            self.basket[key_var.get()] -= 1
+            if self.trail:
+                self.trail.pop(0)
         self.populations[key_var.get()] -= 1
         key_var.set(self.__get_face_key('nommer'))
         return self.check_round_complete()
 
     def move_runner(self):
         """
-        Rules:
-        -- when player is far away:
-            avoid nommer and chase chaser
-        -- when player is close by:
-            move to 3rd furthest corner from player,
-            breaking ties by choosing the one closest to the runner.
-            if the player is closer to that corner than the runner,
-                hug the wall. Otherwise, stray somewhat from the wall.
+        Just tries to run away from the player.
         """
         safe_dist = self.width / 2
         dist = (self.player - self.runner).norm()
-        center = Pair(self.width//2, self.width//2)
+
         # If within safe distance from player,
         # Avoid the nommer and chase the chaser:
         if dist >= safe_dist:
             to_chaser = self.chaser - self.runner
             from_nommer = self.runner - self.nommer
             from_nommer *= self.width/from_nommer.norm()
-            target = self.runner + from_nommer + to_chaser
+            target = self.runner + to_chaser + from_nommer
 
-        # If the runner is closer to the center than the player,
-        # Run from the player and toward the center:
-        elif (center-self.runner).norm() < (center-self.player).norm():
-            target = self.runner + center-self.player
-
-        # Otherwise, run to a corner and away from the player:
         else:
-            corners = [Pair(0, 0),
-                       Pair(self.width-1, 0),
-                       Pair(0, self.width-1),
-                       Pair(self.width-1, self.width-1)]
-            # Any later ties broken by
-            # choosing closest option to runner:
-            corners.sort(key=lambda p: (p-self.runner).norm(), reverse=True)
-            corners.sort(key=lambda p: round((self.player-p).norm(), 3))
-            target = corners[2]
+            d1 = self.width // 6
+            d2 = self.width - 1 - d1
+            corners = [Pair(d1, d1), Pair(d2, d1),
+                       Pair(d1, d2), Pair(d2, d2)]
+            # Move toward a nearby corner. The corner
+            # closest to the player is out of the question:
+            corners.sort(key=lambda p: (self.player-p).norm())
+            corners = corners[2:]
+            corners.sort(
+                key=lambda p:
+                (self.runner-p).norm() -
+                (self.player-p).norm())
+            run = self.runner-self.player
+            target = corners[0] + run*((self.width/4)**-(run.norm()/5))
 
-            # If the player is very close, hug the wall:
-            wall = self.runner.wall(self.width)
-            if dist < safe_dist/3:
-                target += wall * (safe_dist/3)
-            else:
-                push_urgency = safe_dist/(self.runner-self.player).norm()
-                target += -wall * push_urgency
-
-        self.runner += self.__enemy_dest(
+        # Cleanup and execute the move:
+        self.runner += self.__enemy_diff(
             origin=self.runner,
             target=target,
             can_touch_player=False
@@ -485,6 +465,8 @@ class Game:
     @staticmethod
     def __get_diff(origin: Pair, target: Pair):
         diff = abs(target - origin)
+        if target == origin:
+            return Pair(0, 0)
         axis_percent = abs(diff.x-diff.y) / (diff.x+diff.y)
         diff = target - origin
         if weighted_choice({
@@ -496,7 +478,7 @@ class Game:
                 diff.x = 0
         return diff.ceil(radius=1)
 
-    def __enemy_dest(self, origin: Pair, target: Pair,
+    def __enemy_diff(self, origin: Pair, target: Pair,
                      can_touch_player: bool = False):
         """
         target is the position of the tile
@@ -521,17 +503,20 @@ class Game:
         # If the player disabled enemy_diag:
         if not self.enemy_diag.get():
             if weighted_choice({True: abs(diff.x), False: abs(diff.y)}):
-                diff.x = 0
-            else:
                 diff.y = 0
+            else:
+                diff.x = 0
+
+        # Allow enemies like the chaser to touch the player:
+        if can_touch_player and origin+diff == self.player:
+            return diff
 
         # If the enemy would go out of bounds,
         # or touch another enemy or the player illegally:
         desired = self.tile_at(origin+diff)
         if (
                 desired is None or
-                desired.key.get() not in self.populations or
-                origin+diff == self.player and not can_touch_player):
+                desired.key.get() not in self.populations):
             # Find all possible substitutes:
             adj = list(filter(
                 lambda t: t.key.get() in self.populations,
@@ -542,7 +527,7 @@ class Game:
                     lambda t: t.pos.x - origin.x == 0
                     or t.pos.y - origin.y == 0, adj))
             # Favor substitutes in similar direction to that desired:
-            weights = {t: 4**-(origin + diff*2 - t.pos).norm() for t in adj[1:]}
+            weights = {t: 4**-(origin + diff - t.pos).norm() for t in adj[1:]}
             popped = weighted_choice(weights)
             return popped.pos - origin
 
@@ -663,7 +648,6 @@ class SnaKeyGUI(tk.Tk):
         # Options menu:
         options = tk.Menu(menu_bar)
         for name, var in {
-                'ditches':      self.game.ditches_on,
                 'enemy diag':   self.game.enemy_diag,
                 'speedup':      self.game.speedup,
                 'sad mode':     self.game.sad_mode, }.items():
@@ -706,7 +690,7 @@ class SnaKeyGUI(tk.Tk):
         # Execute the move in the internal representation
         round_over = self.game.move_player(event.keysym)
         init_pos.color(
-            self.cs['tile']
+            self.cs['tile']  # <- If backtrack.
             if init_pos not in self.game.trail
             else self.cs['trail'])
         # Update if the trail did not lengthen:
@@ -784,8 +768,13 @@ class SnaKeyGUI(tk.Tk):
         self.__erase_enemy(self.game.nommer_tile())
 
         # Perform the move in the internal representation:
+        trail_tail = None
+        if self.game.trail:
+            trail_tail = self.game.trail[0]
         if self.game.move_nommer():
             self.update_cs()
+        if trail_tail is not None and trail_tail not in self.game.trail:
+            trail_tail.color(self.cs['tile'])
 
         self.game.nommer_tile().color(self.cs['nommer'])
         self.nommer_cancel_id = self.after(
@@ -794,14 +783,26 @@ class SnaKeyGUI(tk.Tk):
         )
 
     def move_runner(self):
+        """
+        The runner moves faster when the player is near it.
+        """
         self.__erase_enemy(self.game.runner_tile())
 
         # Perform the move in the internal representation:
         self.game.move_runner()
 
         self.game.runner_tile().color(self.cs['runner'])
+
+        # Frequency multiplier increases
+        # quadratically with distance from player:
+        g = self.game
+        speedup = 4.5   # The maximum frequency multiplier
+        power = 6       # Increasing this makes urgency range 'smaller'
+        urgency = (speedup-1) / (g.width**power)
+        urgency *= (g.width+1 - (g.runner-g.player).norm()) ** power
+        urgency += 1
         self.runner_cancel_id = self.after(
-            int(1000 / self.game.enemy_speed()),
+            int(1000 / urgency),
             func=self.move_runner
         )
 
