@@ -1,5 +1,6 @@
 from random import choice
 
+import colors as _colors
 from pair import *
 import tkinter as tk
 
@@ -231,9 +232,9 @@ class Game:
             if not self.trail:
                 # There is no trail yet!
                 return
-            # Do not allow the player
-            # to backtrack onto an enemy:
             if self.trail[-1].key.get() not in self.populations:
+                # Do not allow the player
+                # to backtrack onto an enemy:
                 return
             self.__shuffle_tile(self.player_tile())
             popped = self.trail.pop(-1)
@@ -274,6 +275,8 @@ class Game:
                 self.targets.remove(dest)
                 self.basket[select_key] += 1
                 return self.check_round_complete()
+            elif len(self.trail) > sum(self.basket.values()):
+                self.trail.pop(0)
 
         return False
 
@@ -363,15 +366,12 @@ class Game:
         Moves the chaser closer to the player.
         Returns True if the chaser is on the player.
         """
-        # The chaser changes keys in its wake:
-        self.__shuffle_tile(self.chaser_tile())
-
-        self.chaser += self.__enemy_diff(
+        self.chaser += self.__enemy_dest(
             self.chaser,
             target=self.player,
             can_touch_player=True)
         key_var = self.chaser_tile().key
-        if key_var.get() in self.populations:
+        if key_var.get() != self.__get_face_key('player'):
             # If the chaser did not land on the player:
             self.populations[key_var.get()] -= 1
         key_var.set(self.__get_face_key('chaser'))
@@ -412,15 +412,13 @@ class Game:
                 dest += self.trail[i+1].pos - self.trail[i].pos
             dest = dest * (sqrt((self.player - self.nommer).norm()) / hist)
 
-        # Truncate the desired move and modify if illegal:
-        self.__shuffle_tile(self.nommer_tile())
-
         # Execute the move:
-        self.nommer += self.__enemy_diff(
+        self.nommer += self.__enemy_dest(
             origin=self.nommer,
             target=dest,
-            can_touch_player=False)
-        # Nommer may consumer targets:
+            can_touch_player=False
+        )
+        # Nommer may consume targets:
         if self.nommer_tile() in self.targets:
             self.targets.remove(self.nommer_tile())
         key_var = self.nommer_tile().key
@@ -438,28 +436,51 @@ class Game:
             breaking ties by choosing the one closest to the runner.
             if the player is closer to that corner than the runner,
                 hug the wall. Otherwise, stray somewhat from the wall.
-        :return:
         """
         safe_dist = self.width / 2
+        dist = (self.player - self.runner).norm()
+        center = Pair(self.width//2, self.width//2)
         # If within safe distance from player,
         # Avoid the nommer and chase the chaser:
-        if (self.player - self.runner).norm() >= safe_dist:
-            target = self.runner + \
-                     (self.runner-self.nommer)/2 + \
-                     (self.chaser-self.runner)
-        # If the player is close enough, run from it:
+        if dist >= safe_dist:
+            to_chaser = self.chaser - self.runner
+            from_nommer = self.runner - self.nommer
+            from_nommer *= self.width/from_nommer.norm()
+            target = self.runner + from_nommer + to_chaser
+
+        # If the runner is closer to the center than the player,
+        # Run from the player and toward the center:
+        elif (center-self.runner).norm() < (center-self.player).norm():
+            target = self.runner + center-self.player
+
+        # Otherwise, run to a corner and away from the player:
         else:
-            corners = [(0, 0), (self.width-1, 0),
-                       (0, self.width-1),
-                       (self.width-1, self.width-1)]
+            corners = [Pair(0, 0),
+                       Pair(self.width-1, 0),
+                       Pair(0, self.width-1),
+                       Pair(self.width-1, self.width-1)]
             # Any later ties broken by
             # choosing closest option to runner:
-            corners.sort(
-                key=lambda p: (p-self.runner).norm(), reverse=True)
-            corners = [(self.player-Pair(corner)).norm()
-                       for corner in corners]
-            corners.sort()
+            corners.sort(key=lambda p: (p-self.runner).norm(), reverse=True)
+            corners.sort(key=lambda p: round((self.player-p).norm(), 3))
             target = corners[2]
+
+            # If the player is very close, hug the wall:
+            wall = self.runner.wall(self.width)
+            if dist < safe_dist/3:
+                target += wall * (safe_dist/3)
+            else:
+                push_urgency = safe_dist/(self.runner-self.player).norm()
+                target += -wall * push_urgency
+
+        self.runner += self.__enemy_dest(
+            origin=self.runner,
+            target=target,
+            can_touch_player=False
+        )
+        key_var = self.runner_tile().key
+        self.populations[key_var.get()] -= 1
+        key_var.set(self.__get_face_key('runner'))
 
     @staticmethod
     def __get_diff(origin: Pair, target: Pair):
@@ -475,11 +496,13 @@ class Game:
                 diff.x = 0
         return diff.ceil(radius=1)
 
-    def __enemy_diff(self, origin: Pair, target: Pair,
+    def __enemy_dest(self, origin: Pair, target: Pair,
                      can_touch_player: bool = False):
         """
         target is the position of the tile
         targeted by the enemy at origin.
+        Automatically shuffles the tile in
+        the enemy' original position.
 
         Applies the following changes:
         -- optionally projecting enemy diagonal moves onto axes.
@@ -488,6 +511,10 @@ class Game:
         Assumes that the enemy at origin
         currently has no position on the grid.
         """
+        # Automatically shuffle the tile that
+        # The enemy will leave behind:
+        self.__shuffle_tile(self.tile_at(origin))
+
         # Get the offset in the direction of target:
         diff = self.__get_diff(origin, target)
 
@@ -498,14 +525,13 @@ class Game:
             else:
                 diff.y = 0
 
-        # Allow enemies like the chaser to touch the player:
-        if origin + diff == self.player and can_touch_player:
-            return diff
-
-        # If the enemy would touch another enemy or the player:
-        if (self.tile_at(origin+diff) is None or
-                self.tile_at(origin+diff).key.get()
-                not in self.populations):
+        # If the enemy would go out of bounds,
+        # or touch another enemy or the player illegally:
+        desired = self.tile_at(origin+diff)
+        if (
+                desired is None or
+                desired.key.get() not in self.populations or
+                origin+diff == self.player and not can_touch_player):
             # Find all possible substitutes:
             adj = list(filter(
                 lambda t: t.key.get() in self.populations,
@@ -515,10 +541,8 @@ class Game:
                 adj = list(filter(
                     lambda t: t.pos.x - origin.x == 0
                     or t.pos.y - origin.y == 0, adj))
-
             # Favor substitutes in similar direction to that desired:
-            weights = {t: 4**-(origin + diff*2 - t.pos).norm()
-                       for t in adj[1:]}
+            weights = {t: 4**-(origin + diff*2 - t.pos).norm() for t in adj[1:]}
             popped = weighted_choice(weights)
             return popped.pos - origin
 
@@ -554,71 +578,6 @@ class SnaKeyGUI(tk.Tk):
         -- cs       : dict{str: dict{str: str}}
         -- grid:    : Frame
     """
-    color_schemes = {
-        'default': {
-            'lines':    {'bg': 'whiteSmoke', },
-            'tile':     {'bg': 'white',         'fg': 'black'},
-            'chaser':   {'bg': 'violet',        'fg': 'black'},
-            'nommer':   {'bg': 'yellowGreen',   'fg': 'black'},
-            'target':   {'bg': 'gold',          'fg': 'black'},
-            'pos':      {'bg': 'deepSkyBlue',   'fg': 'black'},
-            'trail':    {'bg': 'lightCyan',     'fg': 'black'},
-        },
-        'sheep :>': {
-            'lines':    {'bg': '#77ef02', },
-            'tile':     {'bg': 'lawnGreen',     'fg': 'darkGreen'},
-            'chaser':   {'bg': 'orangeRed',     'fg': 'black'},
-            'nommer':   {'bg': 'orangeRed',     'fg': 'black'},
-            'target':   {'bg': 'limeGreen',     'fg': 'black'},
-            'pos':      {'bg': 'white',         'fg': 'black'},
-            'trail':    {'bg': 'greenYellow',   'fg': 'darkGreen'},
-        },
-        'matrix': {
-            'lines':    {'bg': '#1c1c1c', },
-            'tile':     {'bg': 'black',         'fg': 'darkGrey'},
-            'chaser':   {'bg': 'red',           'fg': 'black'},
-            'nommer':   {'bg': 'red',           'fg': 'black'},
-            'target':   {'bg': 'black',         'fg': 'greenYellow'},
-            'pos':      {'bg': 'limeGreen',     'fg': 'black'},
-            'trail':    {'bg': 'darkGreen',     'fg': 'black'},
-        },
-        'pac-man': {
-            'lines':    {'bg': 'darkBlue', },
-            'tile':     {'bg': 'black',         'fg': 'yellow'},
-            'chaser':   {'bg': 'red',           'fg': 'black'},
-            'nommer':   {'bg': 'cyan',          'fg': 'black'},
-            'target':   {'bg': 'cornSilk',      'fg': 'black'},
-            'pos':      {'bg': 'yellow',        'fg': 'black'},
-            'trail':    {'bg': '#1c1c1c',       'fg': 'seashell'},
-        },
-        'strawberry - NW': {
-            'lines':    {'bg': '#ffb5b5', },
-            'tile':     {'bg': '#fdeded',       'fg': 'black'},
-            'chaser':   {'bg': '#ea56e9',       'fg': 'black'},
-            'nommer':   {'bg': '#00ebd3',   	'fg': 'black'},
-            'target':   {'bg': '#99de00',       'fg': 'black'},
-            'pos':      {'bg': '#ff707c',  	 	'fg': 'black'},
-            'trail':    {'bg': '#fd939c',     'fg': 'black'},
-        },
-        'baby blue - NW': {
-            'lines':    {'bg': '#84b0e5', },
-            'tile':     {'bg': '#bee9fa',       'fg': 'black'},
-            'chaser':   {'bg': '#ee82ee',       'fg': 'black'},
-            'nommer':   {'bg': '#7fff00',   	'fg': 'black'},
-            'target':   {'bg': '#63beff',       'fg': 'black'},
-            'pos':      {'bg': '#00bfff',  	 	'fg': 'black'},
-            'trail':    {'bg': '#7faae1',       'fg': 'black'},
-        },
-        'dark - NW': {
-            'lines':    {'bg': '#3f5e77', },
-            'tile':     {'bg': '#2e3b48',       'fg': '#c3cfef'},
-            'chaser':   {'bg': '#dc68b3',       'fg': 'black'},
-            'nommer':   {'bg': '#2492c6',   	'fg': 'black'},
-            'target':   {'bg': '#5cc679',       'fg': 'black'},
-            'pos':      {'bg': '#55d1ff',  	 	'fg': 'black'},
-            'trail':    {'bg': '#54a0d0',       'fg': 'black'},
-        },
-    }
     pad = 1
 
     def __init__(self, width: int = 20):
@@ -646,12 +605,13 @@ class SnaKeyGUI(tk.Tk):
         self.__setup_menu()
 
         # Setup the colors:
-        self.cs = SnaKeyGUI.color_schemes['default']
+        self.cs = _colors.color_schemes['default']
         self.update_cs()
 
         # Start the chaser:
         self.chaser_cancel_id = self.after(2000, self.move_chaser)
-        self.nommer_cancel_id = self.after(2500, self.move_nommer)
+        self.nommer_cancel_id = self.after(2330, self.move_nommer)
+        self.runner_cancel_id = self.after(2660, self.move_runner)
 
     def __setup_buttons(self):
         """
@@ -665,9 +625,11 @@ class SnaKeyGUI(tk.Tk):
             self.bind('<Key>', self.move_player)
             self.update_cs()
             self.after_cancel(self.chaser_cancel_id)
-            self.chaser_cancel_id = self.after(2000, self.move_chaser)
             self.after_cancel(self.nommer_cancel_id)
-            self.nommer_cancel_id = self.after(2500, self.move_nommer)
+            self.after_cancel(self.runner_cancel_id)
+            self.chaser_cancel_id = self.after(2000, self.move_chaser)
+            self.nommer_cancel_id = self.after(2330, self.move_nommer)
+            self.runner_cancel_id = self.after(2660, self.move_runner)
 
         # Setup the restart button:
         self.restart = tk.Button(
@@ -727,7 +689,7 @@ class SnaKeyGUI(tk.Tk):
         colors = tk.Menu(menu_bar)
         cs_string_var = tk.StringVar()
         cs_string_var.trace('w', update_cs)
-        for scheme in SnaKeyGUI.color_schemes.keys():
+        for scheme in _colors.color_schemes.keys():
             colors.add_radiobutton(
                 label=scheme, value=scheme,
                 variable=cs_string_var, )
@@ -740,9 +702,16 @@ class SnaKeyGUI(tk.Tk):
         changes to the GUI for the player to see.
         """
         init_pos = self.game.player_tile()
+        trail_tail = init_pos if not self.game.trail else self.game.trail[0]
         # Execute the move in the internal representation
         round_over = self.game.move_player(event.keysym)
-        init_pos.color(self.cs['trail'])
+        init_pos.color(
+            self.cs['tile']
+            if init_pos not in self.game.trail
+            else self.cs['trail'])
+        # Update if the trail did not lengthen:
+        if trail_tail not in self.game.trail:
+            trail_tail.color(self.cs['tile'])
 
         # and check if the move resulted in the round ending:
         if round_over:
@@ -760,7 +729,7 @@ class SnaKeyGUI(tk.Tk):
         if cs is None:
             cs = self.cs
         else:
-            cs = SnaKeyGUI.color_schemes[cs]
+            cs = _colors.color_schemes[cs]
             self.cs = cs
 
         # Recolor the menu:
@@ -784,6 +753,7 @@ class SnaKeyGUI(tk.Tk):
         # Highlight the current positions of enemies:
         self.game.chaser_tile().color(cs['chaser'])
         self.game.nommer_tile().color(cs['nommer'])
+        self.game.runner_tile().color(cs['runner'])
 
     def move_chaser(self):
         """
@@ -823,6 +793,18 @@ class SnaKeyGUI(tk.Tk):
             func=self.move_nommer
         )
 
+    def move_runner(self):
+        self.__erase_enemy(self.game.runner_tile())
+
+        # Perform the move in the internal representation:
+        self.game.move_runner()
+
+        self.game.runner_tile().color(self.cs['runner'])
+        self.runner_cancel_id = self.after(
+            int(1000 / self.game.enemy_speed()),
+            func=self.move_runner
+        )
+
     def __erase_enemy(self, tile: Tile):
         if tile in self.game.targets:
             tile.color(self.cs['target'])
@@ -842,6 +824,7 @@ class SnaKeyGUI(tk.Tk):
         # Make sure all enemies stop moving:
         self.after_cancel(self.chaser_cancel_id)
         self.after_cancel(self.nommer_cancel_id)
+        self.after_cancel(self.runner_cancel_id)
 
         # Highlight the restart button:
         self.restart.configure(bg='SystemButtonHighlight')

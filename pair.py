@@ -35,6 +35,15 @@ class Pair:
             y = radius
         return Pair(x, y)
 
+    def wall(self, width: int):
+        """
+        Returns a unit point in the direction of
+        the closest wall bounded by width.
+        """
+        x = int(round(self.x / width * 2 - 1))
+        y = int(round(self.y / width * 2 - 1))
+        return Pair(x, y)
+
     def __abs__(self):
         return Pair(abs(self.x), abs(self.y))
 
@@ -57,6 +66,9 @@ class Pair:
             return Pair(self.x - other.x, self.y - other.y)
         else:
             return NotImplemented
+
+    def __neg__(self):
+        return Pair(-self.x, -self.y)
 
     def __mul__(self, other):
         if isinstance(other, int):
