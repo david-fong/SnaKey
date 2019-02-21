@@ -9,7 +9,6 @@ class Tile:
     """
 
     """
-
     def __init__(self, pos: Pair, key: str = ''):
         self.pos = pos
         self.key = tk.StringVar()
@@ -21,7 +20,7 @@ class Tile:
         self.label.configure(cs)
 
     def __repr__(self):
-        return f'{self.key.get()}{self.pos}'
+        return f'{self.key.get()}:{self.pos}'
 
 
 def weighted_choice(weights: dict):
@@ -67,13 +66,13 @@ class Game:
     -- nommer       : Pair              : Competes with player to eat targets.
     -- runner       : Pair              : Runs from player. That's it?
     -- level        : int               : number of levels completed by the player.
-    -- basket       : dict{str: int}    : total times obtained for each letter.
+    -- score       : dict{str: int}    : total times obtained for each letter.
     -- start        : float             : process time of the start of a round.
     """
     LOWERCASE = {key for key in 'abcdefghijklmnopqrstuvwxyz'}
     faces = {
         'chaser': ':>',
-        'player': ': |',
+        'player': ':|',
         'nommer': ':O',
         'runner': ':D',
     }
@@ -108,7 +107,7 @@ class Game:
         self.nommer:    Pair = None
         self.runner:    Pair = None
         self.level = tk.IntVar()
-        self.basket:    dict = None
+        self.score = tk.IntVar()
         self.restart()
 
     def __setup_options(self):
@@ -134,36 +133,36 @@ class Game:
         Assumes the keys of the board are all generated.
         """
         self.level.set(-1)
-        self.basket = dict.fromkeys(self.populations, 0)
+        self.score.set(0)
 
-        # Initialize the player:
+        # Erase the player and all enemies:
         if self.player is not None:
             self.__shuffle_tile(self.player_tile())
+        if self.chaser is not None:
+            self.__shuffle_tile(self.chaser_tile())
+        if self.nommer is not None:
+            self.__shuffle_tile(self.nommer_tile())
+        if self.runner is not None:
+            self.__shuffle_tile(self.runner_tile())
+
+        # Set spawn points:
         self.player = Pair(self.width // 2, self.width // 2)
         self.targets = []
         self.trail = []
-        self.populations[self.player_tile().key.get()] -= 1
-        self.player_tile().key.set(self.__get_face_key('player'))
-
-        # Initialize the chaser:
-        if self.chaser is not None:
-            self.__shuffle_tile(self.chaser_tile())
         self.chaser = Pair(0, 0)
-        self.populations[self.chaser_tile().key.get()] -= 1
-        self.chaser_tile().key.set(self.__get_face_key('chaser'))
-
-        # Initialize the nommer:
-        if self.nommer is not None:
-            self.__shuffle_tile(self.nommer_tile())
         self.nommer = Pair(self.width-1, self.width-1)
-        self.populations[self.nommer_tile().key.get()] -= 1
-        self.nommer_tile().key.set(self.__get_face_key('nommer'))
-
-        # Initialize the runner:
-        if self.runner is not None:
-            self.__shuffle_tile(self.runner_tile())
         self.runner = Pair(self.width-1, 0)
+
+        # 'Clear' the location for the player:
+        self.populations[self.player_tile().key.get()] -= 1
+        self.populations[self.chaser_tile().key.get()] -= 1
+        self.populations[self.nommer_tile().key.get()] -= 1
         self.populations[self.runner_tile().key.get()] -= 1
+
+        # Spawn each character:
+        self.player_tile().key.set(self.__get_face_key('player'))
+        self.chaser_tile().key.set(self.__get_face_key('chaser'))
+        self.nommer_tile().key.set(self.__get_face_key('nommer'))
         self.runner_tile().key.set(self.__get_face_key('runner'))
 
         # Generate the first round's targets:
@@ -256,9 +255,9 @@ class Game:
             # Handle scoring if player touched a target:
             if dest in self.targets:
                 self.targets.remove(dest)
-                self.basket[dest_key] += 1
+                self.score.set(self.score.get() + 1)
                 return self.check_round_complete()
-            elif len(self.trail) > sum(self.basket.values()):
+            if len(self.trail) > self.score.get():
                 self.trail.pop(0)
 
         return False
@@ -416,7 +415,7 @@ class Game:
         key_var = self.nommer_tile().key
         if self.nommer_tile() in self.targets:
             self.targets.remove(self.nommer_tile())
-            self.basket[key_var.get()] -= 1
+            self.score.set(self.score.get() - 1)
             if self.trail:
                 self.trail.pop(0)
         self.populations[key_var.get()] -= 1
@@ -581,7 +580,8 @@ class SnaKeyGUI(tk.Tk):
                 tile = self.game.tile_at(Pair(x, y))
                 tile.label = tk.Label(
                     grid, height=1, width=1,
-                    textvariable=tile.key, )
+                    textvariable=tile.key,
+                    font=('system', 9, 'bold'),)
                 tile.label.grid(
                     row=y, column=x, ipadx=4,
                     padx=1, pady=1)
@@ -589,7 +589,7 @@ class SnaKeyGUI(tk.Tk):
         grid.pack()
 
         # Bind key-presses and setup the menu:
-        self.__setup_buttons()
+        self.__setup_status_bar()
         self.__setup_menu()
 
         # Setup the colors:
@@ -601,13 +601,13 @@ class SnaKeyGUI(tk.Tk):
         self.chaser_cancel_id: int = None
         self.nommer_cancel_id: int = None
         self.runner_cancel_id: int = None
+        self.pause_button['state'] = 'normal'
         self.__pause(force_to=False)
 
-    def __setup_buttons(self):
+    def __setup_status_bar(self):
         """
-        Sets up buttons to:
-        -- Restart the game.
-        -- pause the game.
+        Sets up buttons to restart and pause the game.
+        Sets up labels to display the player's level and score.
         """
         bar = tk.Frame(self)
 
@@ -627,13 +627,21 @@ class SnaKeyGUI(tk.Tk):
             relief='ridge', bd=1, )
         self.pause_button.grid(row=0, column=1)
 
-        # Setup the score label:
+        # Setup the level label:
         level_text = tk.Label(bar, text='  level:')
         level_text.grid(row=0, column=2)
         level = tk.Label(
             bar, width=2,
             textvariable=self.game.level, )
         level.grid(row=0, column=3)
+
+        # Setup the score label:
+        score_text = tk.Label(bar, text='  score:')
+        score_text.grid(row=0, column=4)
+        score = tk.Label(
+            bar, width=2,
+            textvariable=self.game.score, )
+        score.grid(row=0, column=5)
 
         bar.pack()
 
@@ -645,6 +653,11 @@ class SnaKeyGUI(tk.Tk):
         """
         menu_bar = tk.Menu(self)
         self.configure(menu=menu_bar)
+
+        # Controls menu:
+        menu_bar.add_command(
+            label='controls',
+            command=self.__print_controls, )
 
         # Options menu:
         options = tk.Menu(menu_bar)
@@ -749,6 +762,9 @@ class SnaKeyGUI(tk.Tk):
         and displays the changes in the GUI.
         """
         self.__erase_enemy(self.game.chaser_tile())
+        # TODO: somehow make chaser take head of trail
+        #  if user just recently moved (as if the chaser
+        #  missed / the player was 'too fast').
 
         # Move the chaser in the internal representation:
         if self.game.move_chaser():
@@ -767,9 +783,12 @@ class SnaKeyGUI(tk.Tk):
 
     def move_nommer(self):
         """
-
+        will move faster if the player
+        has recently moved very fast.
         """
         self.__erase_enemy(self.game.nommer_tile())
+        # TODO: somehow make the nommer move faster
+        #  if the player recently moved very fast.
 
         # Perform the move in the internal representation:
         trail_tail = None
@@ -840,13 +859,17 @@ class SnaKeyGUI(tk.Tk):
             self.__pause()
             return
         elif force_to is False:
+            # Rebind the pause button for the player
+            # in case it was unbound due to game-over:
             self.pause_button['text'] = 'un-pause'
             self.__pause()
             return
 
         # Change to the paused state:
         if self.pause_button['text'] == 'pause':
-            self.pause_button['text'] = 'un-pause'
+            self.pause_button.configure(
+                text='un-pause',
+                bg='SystemButtonHighlight', )
             # Disable player movement:
             self.unbind('<Key>')
             self.after_cancel(self.chaser_cancel_id)
@@ -855,12 +878,64 @@ class SnaKeyGUI(tk.Tk):
 
         # Change to the un-paused state:
         else:
-            self.pause_button['text'] = 'pause'
+            self.pause_button.configure(
+                text='pause',
+                bg='SystemButtonFace', )
             # Unfreeze player and enemy movement:
             self.bind('<Key>', self.move_player)
             self.chaser_cancel_id = self.after(1000, self.move_chaser)
             self.nommer_cancel_id = self.after(1330, self.move_nommer)
             self.runner_cancel_id = self.after(1660, self.move_runner)
+
+    def __print_controls(self):
+        self.__pause()
+        f = self.game.faces
+        controls = (
+            # 'PLAYER',
+            '%s' % f['player'],
+            'Type a letter in the eight tiles ',
+            'adjacent to your location to move.',
+            'Eat highlighted tiles to beat rounds',
+            'and increase your trail, which you can',
+            'use to backtrack by pressing space.\n',
+            # 'CHASER',
+            '%s' % f['chaser'],
+            'The game is over when the chaser',
+            'catches you. Be quick on your toes!',
+            '(or your fingers- whatever you)',
+            '(type with- I don\'t judge)\n',
+            # 'NOMMER',
+            '%s' % f['nommer'],
+            'Will fight you for food.',
+            'When it eats, your trail shortens.\n',
+            # 'RUNNER',
+            '%s' % f['runner'],
+            'This guy seems lost. He just runs away.',
+            'Maybe something happens if you get close',
+            'and press space.',
+        )
+        # max_len = max(map(lambda s: len(s), controls))
+        # controls = [line.center(max_len) for line in controls]
+        controls = '\n'.join(controls)
+        print(controls)
+
+        def __continue():
+            popup.destroy()
+            self.pause_button['state'] = 'normal'
+            self.restart_button['state'] = 'normal'
+            self.__pause()
+        self.pause_button['state'] = 'disabled'
+        self.restart_button['state'] = 'disabled'
+        popup = tk.Toplevel(self)
+        popup.protocol('WM_DELETE_WINDOW', __continue)
+        message = tk.Message(
+            popup,
+            text=controls,
+            font='verdana 10',)
+        message.pack()
+        popup.mainloop()
+
+        # TODO: un-pause on window close.
 
     def game_over(self):
         """
@@ -869,10 +944,12 @@ class SnaKeyGUI(tk.Tk):
         # TODO: show the score:
 
         self.__pause(force_to=True)
+        # Prevent un-pausing while player is dead:
+        self.pause_button['state'] = 'disabled'
 
         # Highlight the restart button:
-        self.restart_button.configure(bg='SystemButtonHighlight')
-        print('game over!', self.game.basket)
+        self.restart_button['bg'] = 'SystemButtonHighlight'
+        print('game over! Your score:', self.game.score.get())
 
 
 if __name__ == '__main__':

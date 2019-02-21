@@ -87,7 +87,7 @@ class Pair:
         return self * (1/other)
 
     def __repr__(self):
-        return f'({self.x}, {self.y})'
+        return f'({self.x},{self.y})'
 
     def __hash__(self):
         return hash((self.x, self.y))
