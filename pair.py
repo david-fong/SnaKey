@@ -1,4 +1,5 @@
 from math import sqrt
+from random import randrange
 
 
 class Pair:
@@ -21,6 +22,24 @@ class Pair:
 
     def norm(self):
         return sqrt(self.x ** 2 + self.y ** 2)
+
+    def square_norm(self):
+        abs_self = abs(self)
+        return max(abs_self.x, abs_self.y)
+
+    def linear_norm(self):
+        return abs(self.x) + abs(self.y)
+
+    @staticmethod
+    def rand(bounds: int):
+        """
+        Returns a random pair with
+        -bounds <= x <= bounds,
+        -bounds <= x <= bounds.
+        """
+        return Pair(
+            randrange(-bounds, bounds+1),
+            randrange(-bounds, bounds+1))
 
     def ceil(self, radius: int):
         x = self.x

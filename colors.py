@@ -1,5 +1,15 @@
 color_schemes = {
-    'default': {
+    'dark - NW': {
+        'lines':    {'bg': '#3f5e77', },
+        'tile':     {'bg': '#2e3b48',       'fg': '#c3cfef'},
+        'target':   {'bg': '#5cc679',       'fg': 'black'},
+        'player':   {'bg': '#55d1ff',       'fg': 'black'},
+        'trail':    {'bg': '#54a0d0',       'fg': '#1b242d'},
+        'chaser':   {'bg': '#dc68b3',       'fg': 'black'},
+        'nommer':   {'bg': '#2492c6',       'fg': 'black'},
+        'runner':   {'bg': '#dbbd48',       'fg': 'black'},
+    },
+    'vanilla': {
         'lines':    {'bg': 'whiteSmoke', },
         'tile':     {'bg': 'white',         'fg': 'black'},
         'target':   {'bg': 'gold',          'fg': 'black'},
@@ -9,7 +19,7 @@ color_schemes = {
         'nommer':   {'bg': 'yellowGreen',   'fg': 'black'},
         'runner':   {'bg': 'gold',          'fg': 'black'},
     },
-    'sheep :>': {
+    'sheep!': {
         'lines':    {'bg': '#77ef02', },
         'tile':     {'bg': 'lawnGreen',     'fg': 'darkGreen'},
         'target':   {'bg': 'limeGreen',     'fg': 'black'},
@@ -19,15 +29,25 @@ color_schemes = {
         'nommer':   {'bg': 'white',         'fg': 'black'},
         'runner':   {'bg': 'white',         'fg': 'black'},
     },
-    'dark - NW': {
-        'lines':    {'bg': '#3f5e77', },
-        'tile':     {'bg': '#2e3b48',       'fg': '#c3cfef'},
-        'target':   {'bg': '#5cc679',       'fg': 'black'},
-        'player':   {'bg': '#55d1ff',       'fg': 'black'},
-        'trail':    {'bg': '#54a0d0',       'fg': 'black'},
-        'chaser':   {'bg': '#dc68b3',       'fg': 'black'},
-        'nommer':   {'bg': '#2492c6',       'fg': 'black'},
-        'runner':   {'bg': '#2492c6',       'fg': 'black'},
+    'strawberry - NW': {
+        'lines':    {'bg': '#ffb5b5', },
+        'tile':     {'bg': '#fdeded',       'fg': 'black'},
+        'target':   {'bg': '#99de00',       'fg': 'black'},
+        'player':   {'bg': '#ff707c',       'fg': 'black'},
+        'trail':    {'bg': '#fd939c',       'fg': 'black'},
+        'chaser':   {'bg': '#ea56e9',       'fg': 'black'},
+        'nommer':   {'bg': '#00ebd3',       'fg': 'black'},
+        'runner':   {'bg': '#99de00',       'fg': 'black'},
+    },
+    'baby blue - NW': {
+        'lines':    {'bg': '#84b0e5', },
+        'tile':     {'bg': '#bee9fa',       'fg': 'black'},
+        'target':   {'bg': '#63beff',       'fg': 'black'},
+        'player':   {'bg': '#00bfff',       'fg': 'black'},
+        'trail':    {'bg': '#7faae1',       'fg': 'black'},
+        'chaser':   {'bg': '#ee82ee',       'fg': 'black'},
+        'nommer':   {'bg': '#7fff00',       'fg': 'black'},
+        'runner':   {'bg': '#63beff',       'fg': 'black'},
     },
     'matrix': {
         'lines':    {'bg': '#1c1c1c', },
@@ -48,25 +68,5 @@ color_schemes = {
         'chaser':   {'bg': 'red',           'fg': 'black'},
         'nommer':   {'bg': 'cyan',          'fg': 'black'},
         'runner':   {'bg': 'yellow',        'fg': 'black'},
-    },
-    'strawberry - NW': {
-        'lines':    {'bg': '#ffb5b5', },
-        'tile':     {'bg': '#fdeded',       'fg': 'black'},
-        'target':   {'bg': '#99de00',       'fg': 'black'},
-        'player':   {'bg': '#ff707c',       'fg': 'black'},
-        'trail':    {'bg': '#fd939c',       'fg': 'black'},
-        'chaser':   {'bg': '#ea56e9',       'fg': 'black'},
-        'nommer':   {'bg': '#00ebd3',       'fg': 'black'},
-        'runner':   {'bg': '#00ebd3',       'fg': 'black'},
-    },
-    'baby blue - NW': {
-        'lines':    {'bg': '#84b0e5', },
-        'tile':     {'bg': '#bee9fa',       'fg': 'black'},
-        'target':   {'bg': '#63beff',       'fg': 'black'},
-        'player':   {'bg': '#00bfff',       'fg': 'black'},
-        'trail':    {'bg': '#7faae1',       'fg': 'black'},
-        'chaser':   {'bg': '#ee82ee',       'fg': 'black'},
-        'nommer':   {'bg': '#7fff00',       'fg': 'black'},
-        'runner':   {'bg': '#7fff00',       'fg': 'black'},
     },
 }
