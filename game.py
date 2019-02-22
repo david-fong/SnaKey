@@ -170,7 +170,7 @@ class Game:
         self.runner_tile().key.set(self.__get_face_key('runner'))
 
         # Generate the first round's targets:
-        self.check_round_complete()
+        self.spawn_new_targets()
 
     def __trim_tail(self):
         """
@@ -271,7 +271,7 @@ class Game:
                 self.score.set(self.score.get() + 1)
                 base = self.num_targets
                 self.heat = base * sqrt(self.heat / base + 1)
-                round_over = self.check_round_complete()
+                round_over = self.spawn_new_targets()
             self.__trim_tail()
 
         return round_over
@@ -285,13 +285,13 @@ class Game:
         # Emulate the chaser 'missing'
         # the player when they move fast:
         if self.trail:
-            # If time_delta is level_base_speed/equiv_point,
+            # If time_delta is enemy_base_speed/equiv_point,
             # there is a 50/50 chance the enemy will miss.
             # Think of as how easy it is to make the enemy miss.
             # (pivot around 1: 'same speed' -> same weight)
             max_miss_weight = 5
             equiv_point = 5
-            enemy_speed = self.level_base_speed()
+            enemy_speed = self.enemy_base_speed()
             power = self.player_avg_period() * enemy_speed / equiv_point
             miss_weight = max_miss_weight ** (1 - power)
             target = weighted_choice({
@@ -340,7 +340,7 @@ class Game:
             self.__trim_tail()
         self.populations[key_var.get()] -= 1
         key_var.set(self.__get_face_key('nommer'))
-        return self.check_round_complete()
+        return self.spawn_new_targets()
 
     def move_runner(self):
         """
@@ -387,24 +387,40 @@ class Game:
         self.populations[key_var.get()] -= 1
         key_var.set(self.__get_face_key('runner'))
 
-    def check_round_complete(self):
+    def spawn_new_targets(self):
         """
         Should be called at the end of every move by
         characters which can consume targets.
         Spawns more targets if necessary and returns
         those newly spawned in a list.
         """
+        def bell(p1: Pair, t2: Tile):
+            dist = (p1 - t2.pos).norm()
+            bounds = self.width / 2
+            return 1 - 2 ** -((2*dist/bounds)**2)
+
         # Get an appropriate number
         # of random keys for targets:
         new_targets = []
         while len(self.targets) < self.num_targets:
-            target = choice(self.grid)
+            # Favor tiles with few targets nearby:
+            available = list(filter(
+                lambda t: t not in self.targets and
+                not self.is_character(t), self.grid))
+            weights = dict.fromkeys(available, 0)
+            for tile in weights:
+                loneliness = sum(map(lambda t: bell(tile.pos, t), self.targets))
+                loneliness += self.num_targets * 0.4 * bell(self.player, tile)
+                loneliness += self.num_targets * 0.6 * bell(self.runner, tile)
+                weights[tile] = loneliness
+
+            # Use the generated weights to get a new target:
+            target = weighted_choice(weights)
             if target not in self.targets and not self.is_character(target):
                 self.targets.append(target)
                 new_targets.append(target)
                 if target in self.trail:
                     self.trail.remove(target)
-        # debug = self.targets = [choice(self.targets), ]
         return new_targets
 
     def __adjacent(self, pos: Pair):
@@ -498,15 +514,15 @@ class Game:
         else:
             return diff
 
-    def level_base_speed(self):
+    def enemy_base_speed(self):
         """
         Returns a speed in tiles per second
         """
         obtained = self.score.get() + self.losses.get()
 
         high = 2.2  # Tiles per second
-        low = 0.30  # Tiles per second
-        slowness = 90 * self.num_targets
+        low = 0.33  # Tiles per second
+        slowness = 80 * self.num_targets
         return (high-low) * (1-(2**-(obtained/slowness))) + low
 
     def player_avg_period(self):
@@ -747,7 +763,7 @@ class SnaKeyGUI(tk.Tk):
             # hasn't caught the player.
             self.game.chaser_tile().color(self.cs['chaser'])
             self.chaser_cancel_id = self.after(
-                int(1000 / self.game.level_base_speed()),
+                int(1000 / self.game.enemy_base_speed()),
                 func=self.move_chaser
             )
 
@@ -775,7 +791,7 @@ class SnaKeyGUI(tk.Tk):
         self.game.nommer_tile().color(self.cs['nommer'])
         burst = self.game.heat / 5 + 1
         self.nommer_cancel_id = self.after(
-            int(1000 / self.game.level_base_speed() / burst),
+            int(1000 / self.game.enemy_base_speed() / burst),
             func=self.move_nommer
         )
 
@@ -793,8 +809,8 @@ class SnaKeyGUI(tk.Tk):
         # Frequency multiplier increases
         # quadratically with distance from player:
         g = self.game
-        speedup = 3.8   # The maximum frequency multiplier
-        power = 5.5     # Increasing this makes urgency range 'smaller'
+        speedup = 3.7   # The maximum frequency multiplier.
+        power = 5.5     # Increasing this shrinks high-urgency range.
         urgency = (speedup-1) / (g.width**power)
         urgency *= (g.width+1 - (g.runner-g.player).square_norm()) ** power
         urgency += 1
