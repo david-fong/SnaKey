@@ -1,4 +1,3 @@
-from random import choice
 from time import time
 
 import colors as _colors
@@ -103,16 +102,16 @@ class Game:
         # Initialize game-play options:
         self.__setup_options()
 
-        # Initialize fields:
-        self.targets:   list = None
-        self.player:    Pair = None
-        self.trail:     list = None
-        self.time_start = time()
-        self.time_delta = []
-        self.chaser:    Pair = None
-        self.nommer:    Pair = None
-        self.heat = 0
-        self.runner:    Pair = None
+        # Initialize fields - See restart():
+        self.targets:       list = None
+        self.player:        Pair = None
+        self.trail:         list = None
+        self.time_start:   float = None
+        self.time_delta:    list = None
+        self.chaser:        Pair = None
+        self.nommer:        Pair = None
+        self.heat:           int = None
+        self.runner:        Pair = None
         self.score = tk.IntVar()
         self.losses = tk.IntVar()
         self.restart()
@@ -345,7 +344,15 @@ class Game:
     def move_runner(self):
         """
         Just tries to run away from the player.
+        If the player catches it, their losses
+        due to the nommer will be halved.
         """
+        # Check if the player caught up to the runner:
+        was_caught = False
+        if self.player_tile() in self.__adjacent(self.runner):
+            was_caught = True
+            self.losses.set(self.losses.get() * 2 // 3)
+
         # If within safe distance from player,
         # Avoid the nommer and chase the chaser:
         dist = (self.runner - self.player).norm()
@@ -355,13 +362,13 @@ class Game:
             from_nommer *= self.width/9/from_nommer.norm()
             target = self.runner + to_chaser + from_nommer + Pair.rand(2)
 
+        # Move toward a nearby corner. The two corners
+        # closest to the player are out of the question:
         else:
             d1 = self.width // 5
             d2 = self.width - 1 - d1
             corners = [Pair(d1, d1), Pair(d2, d1),
                        Pair(d1, d2), Pair(d2, d2)]
-            # Move toward a nearby corner. The corner
-            # closest to the player is out of the question:
             corners.sort(
                 key=lambda p:
                 (self.runner-p).norm(),
@@ -373,6 +380,7 @@ class Game:
                 (self.runner-p).norm() -
                 (self.player-p).norm())
             target = corners[0]
+            # Bias away from the player if the are close:
             run = self.runner - self.player
             run *= ((target-self.runner).norm()**2/run.norm())**0.3
             target += run
@@ -383,6 +391,14 @@ class Game:
             target=target,
             can_touch_player=False
         )
+        # Move twice if the player caught the runner
+        # and one move isn't enough to escape again:
+        if was_caught and self.player_tile() in self.__adjacent(self.runner):
+            self.runner += self.__enemy_diff(
+                origin=self.runner,
+                target=target,
+                can_touch_player=False
+            )
         key_var = self.runner_tile().key
         self.populations[key_var.get()] -= 1
         key_var.set(self.__get_face_key('runner'))
@@ -393,6 +409,9 @@ class Game:
         characters which can consume targets.
         Spawns more targets if necessary and returns
         those newly spawned in a list.
+
+        Targets try to spawn spread out and not too
+        close to the player or the nommer.
         """
         def bell(p1: Pair, t2: Tile):
             dist = (p1 - t2.pos).norm()
@@ -809,7 +828,7 @@ class SnaKeyGUI(tk.Tk):
         # Frequency multiplier increases
         # quadratically with distance from player:
         g = self.game
-        speedup = 3.7   # The maximum frequency multiplier.
+        speedup = 4.2   # The maximum frequency multiplier.
         power = 5.5     # Increasing this shrinks high-urgency range.
         urgency = (speedup-1) / (g.width**power)
         urgency *= (g.width+1 - (g.runner-g.player).square_norm()) ** power
@@ -884,48 +903,50 @@ class SnaKeyGUI(tk.Tk):
         with an explanation of the game appears.
         """
         self.__pause(force_to=True)
-        f = self.game.faces
-        controls = (
-            # 'PLAYER',
-            '%s' % f['player'],
-            'Type a letter in the eight tiles ',
-            'adjacent to your location to move.',
-            'Eat highlighted tiles to beat rounds',
-            'and increase your trail, which you can',
-            'use to backtrack by pressing space.\n',
-            # 'CHASER',
-            '%s' % f['chaser'],
-            'The game is over when the chaser',
-            'catches you. Be quick on your toes!',
-            '(or your fingers- whatever you)',
-            '(type with- I don\'t judge)\n',
-            # 'NOMMER',
-            '%s' % f['nommer'],
-            'Will fight you for food.',
-            'When it eats, your trail shortens.\n',
-            # 'RUNNER',
-            '%s' % f['runner'],
-            'This guy seems lost. He just runs away.',
-            'Maybe something happens if you get close',
-            'and press space.',
-        )
-        # max_len = max(map(lambda s: len(s), controls))
-        # controls = [line.center(max_len) for line in controls]
-        controls = '\n'.join(controls)
-
         self.pause_button['state'] = 'disabled'
         self.restart_button['state'] = 'disabled'
-        popup = tk.Toplevel(self)
+        description = (
+            ['player',
+             'Type a letter in the eight tiles',
+             'adjacent to your location to move.',
+             'Eat highlighted tiles to gain score',
+             'and grow your trail, which you can',
+             'use to backtrack by pressing space.', ],
+            ['chaser',
+             'The game ends if the chaser catches',
+             'you, so be quick on your toes! ...',
+             '(or your fingers- whatever you type',
+             'with- I don\'t judge)', ],
+            ['nommer',
+             'This guy will compete with you for',
+             'food. While he\'s quite harmless, he',
+             'refuses to pay his bill, and the chaser',
+             'is after you for it!', ],
+            ['runner',
+             'What a cheeky little fellow. Maybe he',
+             'just wants to play a game of tag?', ],
+        )
+        max_line_length = max([max(map(
+            lambda line: len(line), character))
+            for character in description])
+
+        popup = tk.Toplevel(self, bd=3)
+        popup.configure(self.cs['lines'])
 
         def __continue():
             popup.destroy()
             self.restart_button['state'] = 'normal'
             self.pause_button['state'] = 'normal'
         popup.protocol('WM_DELETE_WINDOW', __continue)
-        message = tk.Message(
-            popup, text=controls,
-            font='verdana 8', )
-        message.pack()
+        for i in range(len(description)):
+            character = description[i].copy()
+            character[0] = self.game.faces[character[0]]
+            label = tk.Label(
+                popup, text='\n'.join(character),
+                font=('system', 9, 'bold'), width=max_line_length, )
+            # label.configure(self.cs[description[i][0]])
+            label.configure(self.cs['tile'])
+            label.grid(row=i, column=0, ipady=10, padx=3, pady=3)
         popup.mainloop()
 
     def game_over(self):
