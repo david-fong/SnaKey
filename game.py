@@ -413,10 +413,9 @@ class Game:
         Targets try to spawn spread out and not too
         close to the player or the nommer.
         """
-        def bell(p1: Pair, t2: Tile):
-            dist = (p1 - t2.pos).norm()
-            bounds = self.width / 2
-            return 1 - 2 ** -((2*dist/bounds)**2)
+        def bell(p1: Pair, p2: Pair, radius, lip=1.0, peak=0.0):
+            dist = (p1 - p2).norm()
+            return (peak-lip) * 2 ** -((2*dist/radius)**2) + lip
 
         # Get an appropriate number
         # of random keys for targets:
@@ -424,14 +423,16 @@ class Game:
         while len(self.targets) < self.num_targets:
             # Favor tiles with few targets nearby:
             available = list(filter(
-                lambda t: t not in self.targets and
-                not self.is_character(t), self.grid))
-            weights = dict.fromkeys(available, 0)
-            for tile in weights:
-                loneliness = sum(map(lambda t: bell(tile.pos, t), self.targets))
-                loneliness += self.num_targets * 0.4 * bell(self.player, tile)
-                loneliness += self.num_targets * 0.6 * bell(self.runner, tile)
-                weights[tile] = loneliness
+                lambda tile: tile not in self.targets and
+                not self.is_character(tile), self.grid))
+            weights = dict.fromkeys(available, 0.0)
+
+            center = Pair(self.width//2, self.width//2)
+            for t in weights:
+                # Slight bias towards the center:
+                weights[t] = bell(center, t.pos, 0.8*self.width, lip=0, peak=1)
+                weights[t] += bell(self.player, t.pos, self.width/3, lip=0, peak=0.6)
+                weights[t] += bell(self.nommer, t.pos, self.width/3, lip=0, peak=0.6)
 
             # Use the generated weights to get a new target:
             target = weighted_choice(weights)
@@ -535,14 +536,17 @@ class Game:
 
     def enemy_base_speed(self):
         """
-        Returns a speed in tiles per second
+        Returns a speed in tiles per second.
+        Uses an upside-down bell-curve shape
+        as a function of the sum of the absolutes
+        of the the player's score and losses.
         """
         obtained = self.score.get() + self.losses.get()
 
-        high = 2.2  # Tiles per second
-        low = 0.33  # Tiles per second
-        slowness = 80 * self.num_targets
-        return (high-low) * (1-(2**-(obtained/slowness))) + low
+        high = 1.4  # Tiles per second
+        low = 0.34  # Tiles per second
+        slowness = 15 * self.num_targets
+        return (high-low) * (1-(2**-(obtained/slowness)**2)) + low
 
     def player_avg_period(self):
         if len(self.time_delta) > 5:
@@ -919,12 +923,13 @@ class SnaKeyGUI(tk.Tk):
              'with- I don\'t judge)', ],
             ['nommer',
              'This guy will compete with you for',
-             'food. While he\'s quite harmless, he',
-             'refuses to pay his bill, and the chaser',
-             'is after you for it!', ],
+             'food. While he\'s quite harmless,',
+             'he hasn\'t paid his bill, and the',
+             'chaser is after you for it!', ],
             ['runner',
              'What a cheeky little fellow. Maybe he',
-             'just wants to play a game of tag?', ],
+             'just wants to play a game of tag? Wait-',
+             'is that a stolen wallet in his hand?', ],
         )
         max_line_length = max([max(map(
             lambda line: len(line), character))
