@@ -51,6 +51,7 @@ class Game:
     -- grid         : list{Tile}        : Row-order. Index 0 is at the top left of the screen.
 
     GAME-PLAY OPTIONS -----------------------------------------------------------------------------
+    -- kick_start   : BooleanVar        : Whether to start a new game with some losses.
     -- diagonals    : BooleanVar        : Whether the player and enemies can move in diagonals.
     -- sad_mode     : BooleanVar        : Makes the faces sad. Purely aesthetic.
 
@@ -95,7 +96,7 @@ class Game:
         if keyset is None:
             keyset = Game.LOWERCASE
         self.populations = dict.fromkeys(keyset, 0)
-        self.num_targets = (self.width ** 2) / len(self.populations) / 3
+        self.num_targets = (self.width ** 2) / 72
         for tile in self.grid:
             self.__shuffle_tile(tile)
 
@@ -121,6 +122,9 @@ class Game:
         Initialize options fields
         for the menu-bar in the GUI.
         """
+        self.kick_start = tk.BooleanVar()
+        self.kick_start.set(False)
+
         self.diagonals = tk.BooleanVar()
         self.diagonals.set(True)
 
@@ -133,7 +137,7 @@ class Game:
         Assumes the keys of the board are all generated.
         """
         self.score.set(0)
-        self.losses.set(0)
+        self.losses.set(0 if not self.kick_start.get() else 120)
 
         # Erase the player and all enemies:
         if self.player is not None:
@@ -175,7 +179,7 @@ class Game:
         """
         Controls the formula for the length of the trail.
         """
-        net = self.score.get() - self.losses.get()
+        net = self.score.get() - 3/4*self.losses.get()
         if net < 0 or len(self.trail) > (11 / 10) * net**(3 / 5):
             if self.trail:
                 self.trail.pop(0)
@@ -534,18 +538,23 @@ class Game:
         else:
             return diff
 
-    def enemy_base_speed(self):
+    def enemy_base_speed(self, curve_down: float = 0.0):
         """
         Returns a speed in tiles per second.
         Uses an upside-down bell-curve shape
         as a function of the sum of the absolutes
         of the the player's score and losses.
+
+        curve_down is in the range[0, 1).
+        compresses the effect of the dependant
+        variable by using fractional powers.
         """
         obtained = self.score.get() + self.losses.get()
+        obtained **= 1.0 - curve_down
 
-        high = 1.4  # Tiles per second
-        low = 0.34  # Tiles per second
-        slowness = 15 * self.num_targets
+        high = 1.5  # Tiles per second
+        low = 0.35  # Tiles per second
+        slowness = 25 * self.num_targets
         return (high-low) * (1-(2**-(obtained/slowness)**2)) + low
 
     def player_avg_period(self):
@@ -711,12 +720,13 @@ class SnaKeyGUI(tk.Tk):
 
         # Controls menu:
         menu_bar.add_command(
-            label='controls',
+            label='how to play',
             command=self.__print_controls, )
 
         # Options menu:
         options = tk.Menu(menu_bar)
         for name, var in {
+                'kick-start':   self.game.kick_start,
                 'diagonals':    self.game.diagonals,
                 'sad mode':     self.game.sad_mode, }.items():
             options.add_checkbutton(
@@ -814,7 +824,7 @@ class SnaKeyGUI(tk.Tk):
         self.game.nommer_tile().color(self.cs['nommer'])
         burst = self.game.heat / 5 + 1
         self.nommer_cancel_id = self.after(
-            int(1000 / self.game.enemy_base_speed() / burst),
+            int(1000 / self.game.enemy_base_speed(curve_down=0.05) / burst),
             func=self.move_nommer
         )
 
@@ -832,7 +842,7 @@ class SnaKeyGUI(tk.Tk):
         # Frequency multiplier increases
         # quadratically with distance from player:
         g = self.game
-        speedup = 4.2   # The maximum frequency multiplier.
+        speedup = 2.8   # The maximum frequency multiplier.
         power = 5.5     # Increasing this shrinks high-urgency range.
         urgency = (speedup-1) / (g.width**power)
         urgency *= (g.width+1 - (g.runner-g.player).square_norm()) ** power
