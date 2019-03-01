@@ -14,7 +14,7 @@ jpn_temp[5][2] = 'fu'
 jpn_romanization = []
 for row in jpn_temp:
     jpn_romanization.extend(row)
-jpn_romanization.extend(['ya', 'yu', 'yo', 'wa', 'wo', 'nn'])
+jpn_romanization.extend(['ya', 'yu', 'yo', 'wa', 'wo', 'n'])
 jpn_romanization = tuple(jpn_romanization)
 hiragana = 'あいうえおかきくけこさしすせそ' \
              'たちつてとなにぬねのはひふへほ' \

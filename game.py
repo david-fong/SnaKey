@@ -260,7 +260,7 @@ class Game:
 
         self.move_str += key
         adj = self.__adjacent(self.player)
-        adj.remove(self.player_tile())
+        adj = list(filter(lambda t: not self.is_character(t), adj))
         # Adjacent tiles with the same key as the key parameter:
         dest_singleton = list(filter(
             lambda t: self.move_str.endswith(
