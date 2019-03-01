@@ -2,7 +2,11 @@ from time import time
 
 import colors as _colors
 from pair import *
+from languages import LANGUAGES
 import tkinter as tk
+
+
+VERSION_NUM = '1.'
 
 
 class Tile:
@@ -46,18 +50,22 @@ class Game:
     Attributes:
     CORE ATTRIBUTES -------------------------------------------------------------------------------
     -- width        : int               : The length of both the grid's sides in tiles.
-    -- populations  : dict{str: int}    : Map from all keys to their #instances in the grid.
+    -- language     : dict{str: str}    : Map from display keys to their alphabet strings.
+    -- populations  : dict{str: int}    : Map from all display keys to their #occurances in the grid.
                                           The sum of the values should always be width ** 2.
     -- grid         : list{Tile}        : Row-order. Index 0 is at the top left of the screen.
+    -- num_targets  : int               : Number of targets to maintain on the grid.
 
     GAME-PLAY OPTIONS -----------------------------------------------------------------------------
+    -- lang_choice  : StringVar         : The language to use for the next game.
     -- kick_start   : BooleanVar        : Whether to start a new game with some losses.
     -- diagonals    : BooleanVar        : Whether the player and enemies can move in diagonals.
     -- sad_mode     : BooleanVar        : Makes the faces sad. Purely aesthetic.
 
     PLAYER POSITION DATA --------------------------------------------------------------------------
-    -- num_targets  : int               : Number of targets to maintain on the grid.
     -- targets      : list{Tile}        : tiles containing the target letter for a round.
+    -- move_str     : str               : keys the user has recently pressed, which may map to a
+                    :                   : display key in self.language.
     -- player       : Pair              : The player's current position.
     -- trail        : list{Tile}        : tiles the player has visited in a round.
     -- time_delta   : list{float}       : period of last few moves in seconds.
@@ -71,7 +79,7 @@ class Game:
     -- score        : tk.IntVar         : number of targets reached by player.
     -- losses       : tk.IntVar         : number of targets reached by nommer.
     """
-    LOWERCASE = {key for key in 'abcdefghijklmnopqrstuvwxyz'}
+    target_thinness = 72
     faces = {
         'chaser': ':>',
         'player': ':|',
@@ -79,7 +87,7 @@ class Game:
         'runner': ':D',
     }
 
-    def __init__(self, width: int, keyset: set = None):
+    def __init__(self, width: int, lang_choice: str = 'english lower'):
         """
         Keyset MUST have more than 20 unique keys that are
         recognized as part of tk.Event.keysym
@@ -91,20 +99,18 @@ class Game:
             self.grid.extend(
                 [Tile(Pair(x, y)) for
                  x in range(width)])
-
-        # initialize letters with random, balanced keys:
-        if keyset is None:
-            keyset = Game.LOWERCASE
-        self.populations = dict.fromkeys(keyset, 0)
-        self.num_targets = (self.width ** 2) / 72
-        for tile in self.grid:
-            self.__shuffle_tile(tile)
+        self.num_targets = (self.width ** 2) / Game.target_thinness
 
         # Initialize game-play options:
+        self.lang_choice = tk.StringVar()
+        self.lang_choice.set(lang_choice)
         self.__setup_options()
 
         # Initialize fields - See restart():
+        self.language:      dict = None
+        self.populations:   dict = None
         self.targets:       list = None
+        self.move_str:       str = None
         self.player:        Pair = None
         self.trail:         list = None
         self.time_start:   float = None
@@ -139,6 +145,12 @@ class Game:
         self.score.set(0)
         self.losses.set(0 if not self.kick_start.get() else 120)
 
+        # initialize letters with random, balanced keys:
+        self.language = LANGUAGES[self.lang_choice.get()].copy()
+        self.populations = dict.fromkeys(self.language, 0)
+        for tile in self.grid:
+            self.__shuffle_tile(tile)
+
         # Erase the player and all enemies:
         if self.player is not None:
             self.__shuffle_tile(self.player_tile())
@@ -150,8 +162,9 @@ class Game:
             self.__shuffle_tile(self.runner_tile())
 
         # Set spawn points:
-        self.player = Pair(self.width // 2, self.width // 2)
         self.targets = []
+        self.move_str = ''
+        self.player = Pair(self.width // 2, self.width // 2)
         self.trail = []
         self.time_start = time()
         self.time_delta = []
@@ -245,12 +258,14 @@ class Game:
             popped.key.set(self.__get_face_key('player'))
             return
 
-        if key not in self.populations:
-            return False  # Ignore keys not in the grid.
-
+        self.move_str += key
         adj = self.__adjacent(self.player)
+        adj.remove(self.player_tile())
         # Adjacent tiles with the same key as the key parameter:
-        dest_singleton = list(filter(lambda t: t.key.get() == key, adj))
+        dest_singleton = list(filter(
+            lambda t: self.move_str.endswith(
+                self.language[t.key.get()]),
+            adj))
 
         # If the user pressed a key
         # corresponding to an adjacent tile:
@@ -554,7 +569,7 @@ class Game:
 
         high = 1.5  # Tiles per second
         low = 0.35  # Tiles per second
-        slowness = 25 * self.num_targets
+        slowness = 25 * (20 ** 2 / Game.target_thinness)  # self.num_targets
         return (high-low) * (1-(2**-(obtained/slowness)**2)) + low
 
     def player_avg_period(self):
@@ -590,7 +605,7 @@ class Game:
 
     def is_character(self, tile: Tile):
         """ tile must not be None. """
-        return tile.key.get() not in self.populations
+        return tile.key.get() not in self.language
 
     def __get_face_key(self, character: str):
         face = Game.faces[character]
@@ -723,31 +738,39 @@ class SnaKeyGUI(tk.Tk):
             label='how to play',
             command=self.__print_controls, )
 
-        # Options menu:
-        options = tk.Menu(menu_bar)
-        for name, var in {
-                'kick-start':   self.game.kick_start,
-                'diagonals':    self.game.diagonals,
-                'sad mode':     self.game.sad_mode, }.items():
-            options.add_checkbutton(
-                label=name,
-                offvalue=False,
-                onvalue=True,
-                variable=var, )
-        menu_bar.add_cascade(label='options', menu=options)
+        # Language menu:
+        language_menu = tk.Menu(menu_bar)
+        for language in LANGUAGES:
+            language_menu.add_radiobutton(
+                label=language, value=language,
+                variable=self.game.lang_choice, )
+        menu_bar.add_cascade(label='language', menu=language_menu)
 
         # Color scheme menu:
         def update_cs(*_):
             self.update_cs(cs_string_var.get())
 
-        colors = tk.Menu(menu_bar)
+        colors_menu = tk.Menu(menu_bar)
         cs_string_var = tk.StringVar()
         cs_string_var.trace('w', update_cs)
         for scheme in _colors.color_schemes.keys():
-            colors.add_radiobutton(
+            colors_menu.add_radiobutton(
                 label=scheme, value=scheme,
                 variable=cs_string_var, )
-        menu_bar.add_cascade(label='colors', menu=colors)
+        menu_bar.add_cascade(label='colors', menu=colors_menu)
+
+        # Options menu:
+        options_menu = tk.Menu(menu_bar)
+        for name, var in {
+                'kick-start':   self.game.kick_start,
+                'diagonals':    self.game.diagonals,
+                'sad mode':     self.game.sad_mode, }.items():
+            options_menu.add_checkbutton(
+                label=name,
+                offvalue=False,
+                onvalue=True,
+                variable=var, )
+        menu_bar.add_cascade(label='options', menu=options_menu)
 
     def move_player(self, event):
         """

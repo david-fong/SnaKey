@@ -5,9 +5,9 @@ color_schemes = {
         'target':   {'bg': '#5cc679',   'fg': 'black'},
         'player':   {'bg': '#2fc2e0',   'fg': 'black'},
         'trail':    {'bg': '#3f7ba3',   'fg': '#182028'},
-        'chaser':   {'bg': '#e069b6',   'fg': 'black'},
-        'nommer':   {'bg': '#2899e0',   'fg': 'black'},
-        'runner':   {'bg': '#5cc679',   'fg': 'black'},
+        'chaser':   {'bg': '#ff75ce',   'fg': 'black'},
+        'nommer':   {'bg': '#2aa8f7',   'fg': 'black'},
+        'runner':   {'bg': '#ffdb3f',   'fg': 'black'},
         },
     'sheep': {
         'lines':    {'bg': '#78ce27', },
