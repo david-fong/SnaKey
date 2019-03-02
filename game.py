@@ -6,7 +6,7 @@ from languages import LANGUAGES
 import tkinter as tk
 
 
-VERSION_NUM = '1.'
+VERSION_NUM = 1.3
 
 
 class Tile:
@@ -209,8 +209,9 @@ class Game:
         def __wide_adjacent(origin: Tile):
             """
             Return a set of keys in the 5x5 ring around tile.
-            This represents keys that cannot go in tile, since
-            they would create an ambiguity in movement direction.
+            This represents typing keys for display keys that
+            cannot go in tile, since they would create an
+            ambiguity in movement direction.
             """
             adjacent = []
             for y in range(-2, 3, 1):
@@ -219,17 +220,16 @@ class Game:
                      for x in range(-2, 3, 1)])
             del adjacent[12]  # The current position.
             adjacent = {self.tile_at(pair) for pair in adjacent}
-            if None in adjacent:
-                adjacent.remove(None)
-            return {t.key.get() for t in adjacent}
+            return {self.language[t.key.get()] for t in adjacent
+                    if t is not None and t.key.get() in self.language}
 
-        lower = min(self.populations.values())
         adj = __wide_adjacent(tile)
-
-        weights = {
-            # Gives zero weight to neighboring keys.
-            key: 4 ** (lower - count) if key not in adj else 0
-            for key, count in self.populations.items()}
+        weights = {k: v for k, v in self.populations.items()
+                   if not any(map(lambda s: s in self.language[k], adj))
+                   and not any(map(lambda s: self.language[k] in s, adj))}
+        lower = min(weights.values())
+        for k in weights:
+            weights[k] = 4 ** (lower - weights[k])
 
         new_key = weighted_choice(weights)
         tile.key.set(new_key)
@@ -271,6 +271,7 @@ class Game:
         # corresponding to an adjacent tile:
         round_over = False
         if dest_singleton:
+            self.move_str = ''
             self.time_delta.append(time() - self.time_start)
             self.time_start = time()
             # The selected tile to move to:
@@ -650,7 +651,7 @@ class SnaKeyGUI(tk.Tk):
 
     def __init__(self, width: int = 20):
         super(SnaKeyGUI, self).__init__()
-        self.title('SnaKey - David F.')
+        self.title('SnaKey v' + str(VERSION_NUM) + ' - David F.')
         self.game = Game(width)
 
         # Setup the grid display:

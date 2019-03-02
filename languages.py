@@ -1,6 +1,11 @@
 """
 Please only use as follows:
 from LANGUAGES import LANGUAGES
+
+Rules for defining languages:
+-- must map from display key (what the player sees)
+   to typing key (what the player types to move around).
+-- no typing keys should start with another typing key as a substring.
 """
 
 lowercase = 'abcdefghijklmnopqrstuvwxyz'
@@ -14,7 +19,7 @@ jpn_temp[5][2] = 'fu'
 jpn_romanization = []
 for row in jpn_temp:
     jpn_romanization.extend(row)
-jpn_romanization.extend(['ya', 'yu', 'yo', 'wa', 'wo', 'n'])
+jpn_romanization.extend(['ya', 'yu', 'yo', 'wa', 'wo', 'nn'])
 jpn_romanization = tuple(jpn_romanization)
 hiragana = 'あいうえおかきくけこさしすせそ' \
              'たちつてとなにぬねのはひふへほ' \
@@ -28,4 +33,3 @@ LANGUAGES = {
     'japanese hiragana': {k: v for k, v in zip(hiragana, jpn_romanization)},
     'japanese katakana': {k: v for k, v in zip(katakana, jpn_romanization)},
 }
-
