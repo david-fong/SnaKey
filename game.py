@@ -59,7 +59,7 @@ class Game:
     GAME-PLAY OPTIONS -----------------------------------------------------------------------------
     -- lang_choice  : StringVar         : The language to use for the next game.
     -- kick_start   : BooleanVar        : Whether to start a new game with some losses.
-    -- diagonals    : BooleanVar        : Whether the player and enemies can move in diagonals.
+
     -- sad_mode     : BooleanVar        : Makes the faces sad. Purely aesthetic.
 
     PLAYER POSITION DATA --------------------------------------------------------------------------
@@ -131,9 +131,6 @@ class Game:
         self.kick_start = tk.BooleanVar()
         self.kick_start.set(False)
 
-        self.diagonals = tk.BooleanVar()
-        self.diagonals.set(True)
-
         self.sad_mode = tk.BooleanVar()
         self.sad_mode.set(False)
 
@@ -192,8 +189,8 @@ class Game:
         """
         Controls the formula for the length of the trail.
         """
-        net = self.score.get() - 3/4*self.losses.get()
-        if net < 0 or len(self.trail) > (11 / 10) * net**(3 / 5):
+        net = self.score.get() - self.losses.get()
+        if net < 0 or len(self.trail) > net**(3 / 7):
             if self.trail:
                 self.trail.pop(0)
 
@@ -308,8 +305,8 @@ class Game:
             # there is a 50/50 chance the enemy will miss.
             # Think of as how easy it is to make the enemy miss.
             # (pivot around 1: 'same speed' -> same weight)
-            max_miss_weight = 5
-            equiv_point = 5
+            max_miss_weight = 4.0
+            equiv_point = 4.0
             enemy_speed = self.enemy_base_speed()
             power = self.player_avg_period() * enemy_speed / equiv_point
             miss_weight = max_miss_weight ** (1 - power)
@@ -474,11 +471,6 @@ class Game:
                     for x in range(-1, 2)}
         if None in adj:
             adj.remove(None)
-        # Restrict to D-pad movement if necessary:
-        if not self.diagonals.get():
-            adj = list(filter(
-                lambda t: t.pos.x - pos.x == 0
-                or t.pos.y - pos.y == 0, adj))
         return adj
 
     @staticmethod
@@ -523,13 +515,6 @@ class Game:
 
         # Get the offset in the direction of target:
         diff = self.__enemy_diff_ceil(origin, target)
-
-        # If the player disabled diagonals:
-        if not self.diagonals.get():
-            if weighted_choice({True: abs(diff.x), False: abs(diff.y)}):
-                diff.y = 0
-            else:
-                diff.x = 0
 
         # Allow enemies like the chaser to touch the player:
         if can_touch_player and origin+diff == self.player:
@@ -764,7 +749,6 @@ class SnaKeyGUI(tk.Tk):
         options_menu = tk.Menu(menu_bar)
         for name, var in {
                 'kick-start':   self.game.kick_start,
-                'diagonals':    self.game.diagonals,
                 'sad mode':     self.game.sad_mode, }.items():
             options_menu.add_checkbutton(
                 label=name,
