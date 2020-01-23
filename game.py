@@ -331,8 +331,6 @@ class Game:
         used to determine the player's trajectory.
         Decreases the heat if > 1.
         """
-        # If there aren't any near certain characters, head
-        # for a nearby target that is not close to the player:
         targets = sorted(
             self.targets, key=lambda t:
             (self.player-t.pos).square_norm())
@@ -366,6 +364,8 @@ class Game:
         """
         # Check if the player caught up to the runner:
         was_caught = False
+        # TODO: change this conditional to use square_norm()
+        #  so that __adjacent can do the is_character filter internally:
         if self.player_tile() in self.__adjacent(self.runner):
             was_caught = True
             self.losses.set(self.losses.get() * 2 // 3)
@@ -374,7 +374,7 @@ class Game:
         # Avoid the nommer and chase the chaser:
         dist = (self.runner - self.player).norm()
         if dist >= self.width / 2:
-            to_chaser = self.chaser - self.runner
+            to_chaser   = self.chaser - self.runner
             from_nommer = self.runner - self.nommer
             from_nommer *= self.width/9/from_nommer.norm()
             target = self.runner + to_chaser + from_nommer + Pair.rand(2)
@@ -410,6 +410,7 @@ class Game:
         )
         # Move twice if the player caught the runner
         # and one move isn't enough to escape again:
+        # TODO: change this conditional to use square_norm():
         if was_caught and self.player_tile() in self.__adjacent(self.runner):
             self.runner += self.__enemy_diff(
                 origin=self.runner,
@@ -447,7 +448,7 @@ class Game:
             center = Pair(self.width//2, self.width//2)
             for t in weights:
                 # Slight bias towards the center:
-                weights[t] = bell(center, t.pos, 0.8*self.width, lip=0, peak=1)
+                weights[t]  = bell(center,    t.pos, 0.8*self.width, lip=0, peak=1)
                 weights[t] += bell(self.player, t.pos, self.width/3, lip=0, peak=0.6)
                 weights[t] += bell(self.nommer, t.pos, self.width/3, lip=0, peak=0.6)
 
@@ -485,9 +486,10 @@ class Game:
         -- projecting enemy diagonal moves onto axes.
         -- avoiding landing other enemies and the player.
         """
-        diff = abs(target - origin)
         if target == origin:
             return Pair(0, 0)
+        
+        diff = abs(target - origin)
         axis_percent = abs(diff.x-diff.y) / (diff.x+diff.y)
         diff = target - origin
         if weighted_choice({
@@ -547,7 +549,7 @@ class Game:
         of the the player's score and losses.
 
         curve_down is in the range[0, 1).
-        compresses the effect of the dependant
+        compresses the effect of the independant
         variable by using fractional powers.
         """
         obtained = self.score.get() + self.losses.get()
